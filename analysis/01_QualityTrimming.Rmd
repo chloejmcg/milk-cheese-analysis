@@ -154,11 +154,31 @@ head(cheese_filtered_reverse_reads)
 
 ##Filter and Trim Reads
 ```{r}
+#Forward
+filterAndTrim(cheese_forward_reads[1], cheese_filtered_forward_reads[1],
+              truncLen = 220, maxEE = 1, truncQ = 10, 
+              rm.phix = TRUE, compress = TRUE, multithread = FALSE, verbose = TRUE)
+
+#Reverse
+filterAndTrim(cheese_reverse_reads[1], cheese_filtered_reverse_reads[1],
+              truncLen = 220, maxEE = 1, truncQ = 10, 
+              rm.phix = TRUE, compress = TRUE, multithread = FALSE, verbose = TRUE)
+
+#Paired
+
+#filterAndTrim(fwd = cheese_forward_reads, filt = cheese_filtered_forward_reads,
+#              rev = cheese_reverse_reads, filt.rev = #cheese_filtered_reverse_reads,
+#              truncLen = c(220,220), maxEE = c(1,1), truncQ = 10, 
+#              rm.phix = TRUE, compress = TRUE, verbose = TRUE)
+
+#Error in (function (fn, fout, maxN = c(0, 0), truncQ = c(2, 2), truncLen = c(0,  : 
+#  The output and input file names must be different.
+
 filterAndTrim(cheese_forward_reads, cheese_filtered_forward_reads,
               cheese_reverse_reads, cheese_filtered_reverse_reads,
-              truncLen = c(185,165), trimRight = c(40,33),
-              maxN = 0, maxEE = c(1,1), truncQ = 20, 
+              truncLen = c(220,220), maxEE = c(2,2), truncQ = 10, 
               rm.phix = TRUE, compress = TRUE, verbose = TRUE)
+
 
 ```
 
@@ -166,7 +186,11 @@ filterAndTrim(cheese_forward_reads, cheese_filtered_forward_reads,
 
 #Additionally, in the MultiQC and pre-qc plots generated in this analysis, showed that there is a significant amount of reads at the end of both the forward and reverse runs that a significant decrease in quality is observed. For the sake of this asssigment, I decided to be rigid in the analysis with an EE of 1 and trimming basepairs where there is an overall trend of decreasing quality score (phraed <20) and if later I was too strict in the cut off, I can always redo the analysis. 
 
+#Update, my initial parameters were too strict, I only had about a 3.5% retention rate in sequences so I decided to change TrunQ to 10 instead of 20, my truncLen to 220 bps which improved my renetion to 52%. 
+
 #####Troubleshooting why filterAndTrim is not working
+
+```{r}
 #print("Forward Reads:")
 #print(cheese_forward_reads)
 
@@ -204,6 +228,30 @@ filterAndTrim(cheese_forward_reads, cheese_filtered_forward_reads,
 #file.exists(cheese_reverse_reads[1])
 
 #readLines(cheese_forward_reads[1], n = 10)
+
+#readLines(cheese_forward_reads[1], n = 10)
+#readLines(gzfile(cheese_forward_reads[1]), n = 10)
+
+#filterAndTrim(cheese_forward_reads, cheese_filtered_forward_reads,
+#              cheese_reverse_reads, cheese_filtered_reverse_reads,
+#              truncLen = c(220,220), maxEE = c(1,1), truncQ = 10, 
+#              rm.phix = TRUE, compress = TRUE, verbose = TRUE)
+
+#why are solo forwards / reverses working, just not paired?
+#length(cheese_forward_reads) == length(cheese_reverse_reads)
+#length(cheese_filtered_forward_reads) == #length(cheese_filtered_reverse_reads)
+
+#identical(cheese_forward_reads, cheese_filtered_forward_reads)
+#identical(cheese_reverse_reads, cheese_filtered_reverse_reads)
+
+#filterAndTrim(fwd = cheese_forward_reads, filt = cheese_filtered_forward_reads,
+#              rev = cheese_reverse_reads, filt.rev = #cheese_filtered_reverse_reads,
+#              truncLen = c(220,220), maxEE = c(1,1), truncQ = 10, 
+#              rm.phix = TRUE, compress = TRUE, verbose = TRUE)
+
+
+```
+
 ---
 
 ##Assess Trimmed Read Quality
@@ -213,17 +261,62 @@ cheese_forward_filteredQual_plot_12 <-
   plotQualityProfile(cheese_filtered_forward_reads[cheese_random_samples]) + 
   labs(title = "Trimmed Forward Read Quality")
 
-cheese_reverse_filteredQual_plot_12 <- 
-  plotQualityProfile(cheese_filtered_reverse_reads[cheese_random_samples]) + 
-  labs(title = "Trimmed Reverse Read Quality")
+#error : Error: Input/Output
+#  no input files found
+#  dirPath: data/01_DADA2/02_filtered_fastqs/SRR9722167_R2_filtered.fastq.gz
+#  pattern: character(0)
 
-# Put the two plots together 
-cheese_forward_filteredQual_plot_12 + cheese_reverse_filteredQual_plot_12
-```
+#list.files("data/01_DADA2/02_filtered_fastqs", pattern = "_filtered.fastq.gz", full.names = TRUE)
+
+#print(cheese_filtered_forward_reads)
+#print(cheese_random_samples)
+
+#set.seed(123) # Ensures reproducibility
+#random_indices <- sample(length(cheese_filtered_forward_reads), 12)
+
+#cheese_forward_filteredQual_plot_12 <- 
+#  plotQualityProfile(cheese_filtered_forward_reads[random_indices]) + 
+#  labs(title = "Trimmed Forward Read Quality")
+
+#file.exists("data/01_DADA2/02_filtered_fastqs/SRR9722174_R1_filtered.fastq.gz")
+# this is it!!!
+
+#normalizePath("data/01_DADA2/02_filtered_fastqs/SRR9722174_R1_filtered.fastq.gz", mustWork = FALSE)
+
+#filterAndTrim(cheese_forward_reads[1], cheese_filtered_forward_reads[1],
+#              truncLen = 220, maxEE = 1, truncQ = 10, 
+#              rm.phix = TRUE, compress = TRUE, multithread = FALSE, verbose = TRUE)
+
+#list.files("data/01_DADA2/02_filtered_fastqs", pattern = "_filtered.fastq.gz", full.names = TRUE)
+
+#filterAndTrim(cheese_forward_reads[1], cheese_filtered_forward_reads[1],
+#              truncLen = 220, maxEE = 2, truncQ = 10, 
+#             rm.phix = TRUE, compress = TRUE, multithread = FALSE, verbose = TRUE)
+
+
+cheese_forward_filteredQual_plot_12 <- 
+  plotQualityProfile(cheese_filtered_forward_reads[cheese_random_samples]) + 
+  labs(title = "Trimmed Forward Read Quality")
+
 #Error: Input/Output
 #  no input files found
 #  dirPath: data/01_DADA2/02_filtered_fastqs/SRR9722167_R1_filtered.fastq.gz
 #  pattern: character(0) 
+
+cheese_reverse_filteredQual_plot_12 <- 
+  plotQualityProfile(cheese_filtered_reverse_reads[cheese_random_samples]) + 
+  labs(title = "Trimmed Reverse Read Quality")
+
+#Error: Input/Output
+#  no input files found
+#  dirPath: data/01_DADA2/02_filtered_fastqs/SRR9722167_R1_filtered.fastq.gz
+#  pattern: character(0)
+
+# Put the two plots together 
+cheese_forward_filteredQual_plot_12 + cheese_reverse_filteredQual_plot_12
+```
+
+
 
 ##Aggregated Trimmed Plots
 ```{r}
