@@ -1,0 +1,60 @@
+---
+title: "Quality Control: Filtering & Trimming Brazilian Cheese Amplicon Sequences"
+author: "Chloe J. McGovern"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document: 
+    code_folding: show
+    theme: spacelab
+    highlight: pygments
+    keep_md: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+      toc_depth: 3
+  keep_md: true  
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center",
+                      fig.path = "../figures/01_QualityTrimming/") 
+```
+
+#Setting up the Environment
+
+```{r}
+set.seed(238428)
+
+```
+
+#Timing of Script
+```{r}
+start_time <- Sys.time()
+start_time
+```
+
+#Load Outputs
+```{r}
+pacman::p_load(tidyverse, dada2, phyloseq, patchwork, DT, devtools, install = FALSE)
+```
+
+#Reading Raw Sequencing Files
+```{r}
+cheese_raw_fastqs_path <- "data/cheese-fastq-gz"
+cheese_raw_fastqs_path
+
+#Intuition check
+head(list.files(cheese_raw_fastqs_path))
+length(list.files(cheese_raw_fastqs_path))
+
+#Vector 
+```
+
+
+
+
