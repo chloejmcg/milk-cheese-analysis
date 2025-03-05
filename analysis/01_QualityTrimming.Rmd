@@ -33,28 +33,299 @@ set.seed(238428)
 ```
 
 #Timing of Script
-```{r}
+```{r, time}
 start_time <- Sys.time()
 start_time
 ```
 
 #Load Outputs
-```{r}
+```{r, load}
 pacman::p_load(tidyverse, dada2, phyloseq, patchwork, DT, devtools, install = FALSE)
 ```
 
 #Reading Raw Sequencing Files
-```{r}
+```{r, read}
 cheese_raw_fastqs_path <- "data/cheese-fastq-gz"
 cheese_raw_fastqs_path
 
 #Intuition check
 head(list.files(cheese_raw_fastqs_path))
+
+# How many files are there? 
 length(list.files(cheese_raw_fastqs_path))
 
-#Vector 
+#Vector of forward reads
+cheese_forward_reads <- list.files(cheese_raw_fastqs_path, pattern = "_1.fastq.gz", full.names = TRUE)  
+
+#Intuition check
+head(cheese_forward_reads)
+
+#Intuition check 2
+stopifnot(length(cheese_forward_reads) < length(list.files(cheese_raw_fastqs_path)))
+
+#Vector reverse reads
+cheese_reverse_reads <- list.files(cheese_raw_fastqs_path, pattern = "_1.fastq.gz", full.names = TRUE)
+
+#Intuition check
+head(cheese_reverse_reads)
+
+#Intuition check 2
+stopifnot(length(cheese_reverse_reads) == length(cheese_forward_reads))
+```
+
+##Assess Raw Read Quality
+#Evaluate Raw Sequence Quality
+
+#Plot 12 random samples of plots
+```{r, raw-quality}
+# Randomly select 12 samples from dataset to evaluate 
+cheese_random_samples <- sample(1:length(cheese_reverse_reads), size = 12)
+cheese_random_samples
+
+# Calculate and plot quality of these two samples
+cheese_forward_filteredQual_plot_12 <- plotQualityProfile(cheese_forward_reads[cheese_random_samples]) + 
+  labs(title = "Forward Read: Raw Quality")
+
+cheese_reverse_filteredQual_plot_12 <- plotQualityProfile(cheese_reverse_reads[cheese_random_samples]) + 
+  labs(title = "Reverse Read: Raw Quality")
+
+# Plot them together with patchwork
+cheese_forward_filteredQual_plot_12 + cheese_reverse_filteredQual_plot_12
+```
+
+##Aggregated Raw Quality Plots
+
+```{r, aggregate-raw-qc}
+# Aggregate all QC plots 
+# Forward reads
+cheese_forward_preQC_plot <- 
+  plotQualityProfile(cheese_forward_reads, aggregate = TRUE) + 
+  labs(title = "Forward Pre-QC")
+
+# Reverse reads
+cheese_reverse_preQC_plot <- 
+  plotQualityProfile(cheese_reverse_reads, aggregate = TRUE) + 
+  labs(title = "Reverse Pre-QC")
+
+# Now, let's put the two plots together
+cheese_preQC_aggregate_plot <- 
+  cheese_forward_preQC_plot + cheese_reverse_preQC_plot
+
+# Show the plot
+cheese_preQC_aggregate_plot
+```
+
+##Interpertation 1: 
+# There is a decline in reads after 100 cycles/bases for the forward and reverse reads. This data resembles older Illumina sequencing runs with a dramtic dive in quality towards the end of the run.
+
+#The start of the run has a small dip around basepair 7 for both the forward and reverse runs. 
+
+#There are a good amount of reads (in terms of numbers, over one million for both the forward and reverse). There are over a million for the 12 samples so there are lots of basepairs to use for sequencing and may also provide cushion for trimming the sequences to be shorter for better quality. 
+
+##Prepare a placeholder for filtered reads
+```{r, pre-filter}
+# Create vector of sample names from the filenames 
+cheese_sample_names <- sapply(strsplit(basename(cheese_forward_reads), "_"), `[`,1) 
+
+# Intuition Check 
+head(cheese_sample_names)
+```
+
+```{r, placeholder}
+cheese_filtered_fastqs_path <- "data/01_DADA2/02_filtered_fastqs"
+cheese_filtered_fastqs_path
+
+# Create 2 vectors: filtered_forward_reads & filtered_reverse_reads
+#Filtered Forward
+cheese_filtered_forward_reads <- 
+  file.path(cheese_filtered_fastqs_path, paste0(cheese_sample_names, "_R1_filtered.fastq.gz"))
+
+# Intuition Check 
+length(cheese_filtered_forward_reads)
+
+#Filtered Reverse
+cheese_filtered_reverse_reads <- 
+  file.path(cheese_filtered_fastqs_path, paste0(cheese_sample_names, "_R2_filtered.fastq.gz"))
+
+#Intuition Check
+head(cheese_filtered_reverse_reads)
 ```
 
 
+##Filter and Trim Reads
+```{r}
+filterAndTrim(cheese_forward_reads, cheese_filtered_forward_reads,
+              cheese_reverse_reads, cheese_filtered_reverse_reads,
+              truncLen = c(185,165), trimRight = c(40,33),
+              maxN = 0, maxEE = c(1,1), truncQ = 20, 
+              rm.phix = TRUE, compress = TRUE, verbose = TRUE)
 
+```
+
+#I chose these parameters for a few reasons. In the manuscript I am follwing, they did their expected error to be 2, trimmed the bps to 240, and did not specify any bioinformatics work with primers. Thank fully they used standard V4 primers of 515-806 bps. The Earth Microbiome project provided the reference primers basepairs. I was able to see that they did sequence the primers and cut them out in their analysis. 
+
+#Additionally, in the MultiQC and pre-qc plots generated in this analysis, showed that there is a significant amount of reads at the end of both the forward and reverse runs that a significant decrease in quality is observed. For the sake of this asssigment, I decided to be rigid in the analysis with an EE of 1 and trimming basepairs where there is an overall trend of decreasing quality score (phraed <20) and if later I was too strict in the cut off, I can always redo the analysis. 
+
+#####Troubleshooting why filterAndTrim is not working
+#print("Forward Reads:")
+#print(cheese_forward_reads)
+
+#print("Filtered Forward Reads:")
+#print(cheese_filtered_forward_reads)
+
+#print("Reverse Reads:")
+#print(cheese_reverse_reads)
+
+#print("Filtered Reverse Reads:")
+#print(cheese_filtered_reverse_reads)
+
+
+#file.exists(cheese_filtered_forward_reads)
+#file.exists(cheese_filtered_reverse_reads)
+
+#dir.exists(cheese_filtered_fastqs_path)
+
+#file.create(cheese_filtered_forward_reads[1])
+#file.create(cheese_filtered_reverse_reads[1])
+
+#writeLines("test", file.path(cheese_filtered_fastqs_path, "test.txt"))
+
+#print(cheese_filtered_fastqs_path)
+#print(cheese_filtered_forward_reads[1])
+#print(cheese_filtered_reverse_reads[1])
+
+#filterAndTrim(cheese_forward_reads[1], cheese_filtered_forward_reads[1],
+#              cheese_reverse_reads[1], cheese_filtered_reverse_reads[1],
+#              truncLen = c(185,165), trimRight = c(40,33),
+#              maxN = 0, maxEE = c(1,1), truncQ = 20, 
+#              rm.phix = TRUE, compress = TRUE, multithread = FALSE, verbose = TRUE)
+
+#file.exists(cheese_forward_reads[1])
+#file.exists(cheese_reverse_reads[1])
+
+#readLines(cheese_forward_reads[1], n = 10)
+---
+
+##Assess Trimmed Read Quality
+```{r, eval-trim}
+# Plot the 12 random samples after QC
+cheese_forward_filteredQual_plot_12 <- 
+  plotQualityProfile(cheese_filtered_forward_reads[cheese_random_samples]) + 
+  labs(title = "Trimmed Forward Read Quality")
+
+cheese_reverse_filteredQual_plot_12 <- 
+  plotQualityProfile(cheese_filtered_reverse_reads[cheese_random_samples]) + 
+  labs(title = "Trimmed Reverse Read Quality")
+
+# Put the two plots together 
+cheese_forward_filteredQual_plot_12 + cheese_reverse_filteredQual_plot_12
+```
+#Error: Input/Output
+#  no input files found
+#  dirPath: data/01_DADA2/02_filtered_fastqs/SRR9722167_R1_filtered.fastq.gz
+#  pattern: character(0) 
+
+##Aggregated Trimmed Plots
+```{r}
+# Aggregate all QC plots 
+# Forward reads
+cheese_forward_postQC_plot <- 
+  plotQualityProfile(cheese_filtered_forward_reads, aggregate = TRUE) + 
+  labs(title = "Forward Post-QC")
+
+# reverse reads
+cheese_reverse_postQC_plot <- 
+  plotQualityProfile(cheese_filtered_reverse_reads, aggregate = TRUE) + 
+  labs(title = "Reverse Post-QC")
+
+# Now, let's put the two plots together
+cheese_postQC_aggregate_plot <- 
+  # Plot the forward and reverse together 
+  cheese_forward_postQC_plot + cheese_reverse_postQC_plot
+# Show the plot
+cheese_postQC_aggregate_plot
+```
+#Interpertation 2:
+#   NEED TO DO
+
+##Read Retention Post-QC
+```{r}
+# Make output into dataframe 
+filtered_df <- as.data.frame(cheese_filtered_reads) %>%
+  mutate(percent.retained = reads.out/reads.in)
+
+# Intuition check
+# Visualize it in table format 
+DT::datatable(cheese_filtered_df)
+
+# Let's calculate some statistics
+read_stats_df <- 
+  filtered_df %>%
+  reframe(median_reads_in = median(reads.in),
+          median_reads_out = median(reads.out),
+          median_percent_retained = (median(reads.out)/median(reads.in)),
+          max_percent_retained = max(reads.out/reads.in),
+          min_percent_retained = min(reads.out/reads.in))
+
+# Take a look at it!
+read_stats_df
+
+# Plot it 
+numSeqs_QC_dotplot <-
+  filtered_df %>%
+  ggplot(aes(x = reads.in, y = reads.out)) + 
+  geom_point(alpha = 0.5, size = 2) + 
+  labs(x = "# of Raw Seqs", 
+       y = "# of Seqs Retained") + 
+  # Now let's add a 1:1 line for reference of keeping 100% of the reads
+  geom_abline(slope=1, intercept = 0, color = "deeppink")
+
+# Now, let's look at the number of reads retained in a histogram
+numRetained_QC_histplot <- 
+  filtered_df %>%
+  ggplot(aes(x = reads.out)) + 
+  geom_histogram() + 
+  labs(x = "# of Seqs Retained", 
+       y = "# of Samples") 
+
+# Create a histogram of percent reads retained in a histogram
+percSeqs_QC_histplot <- 
+  filtered_df %>%
+  ggplot(aes(x = percent.retained)) + 
+  geom_histogram() + 
+  labs(x = "% of Seqs Retained", 
+       y = "# of Samples") + 
+  # Set the scale to be between 0-1 (0-100%)
+  scale_x_continuous(limits = c(0, 1))
+
+# Now, let's put the plots together
+numSeqs_QC_dotplot + numRetained_QC_histplot + percSeqs_QC_histplot + 
+  plot_annotation(tag_levels = 'A')
+```
+#Interpertation 3: NEED TO DO
+#   Panel A: Scatter Plot of Raw vs. Retained Sequences:
+
+#   Panel B: Histogram of the Number of Sequences Retained per Sample
+
+#   Panel C: Histogram of Percent of Sequences Retained
+
+##Visualize QC differences in plot
+```{r}
+# Plot the pre and post together in one plot
+cheese_preQC_aggregate_plot / cheese_postQC_aggregate_plot
+```
+#Interpertation 4: NEED TO DO
+
+#Final Steps
+```{r}
+#Check render time
+end_time <- Sys.time()
+end_time 
+
+elapsed_time <- round((end_time - start_time), 3)
+elapsed_time
+
+#Ensure reproducibility
+devtools::session_info()
+```
 
