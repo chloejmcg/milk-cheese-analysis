@@ -1,0 +1,257 @@
+---
+title: "Assigning ASVs with DADA2"
+author: "Chloe J. McGovern"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document: 
+    code_folding: show
+    theme: spacelab
+    highlight: pygments
+    keep_md: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+      toc_depth: 3
+  keep_md: true  
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center",
+                      #Send figures generated in this file to the folder below
+                      fig.path = "../figures/02_Assign_ASVs/") 
+```
+
+#Goals
+
+1. Infer errors in the sequences, separately on the forward and reverse reads.
+2. Assign ASVs on both the forward and reverse reads, separately. Apply the error model. 
+3. Merge the forward and reverse ASVs into "contiguous ASVs".
+4. Generate our first draft of our ASV count table. 
+5. Quality trimming of ASV lengths.
+6. Remove chimeras.
+7. Assign Taxonomy with Silva Database.
+. Write out relevant files: `asv_table` , `asvs_fasta` , and `sample_data` . 
+
+#Input
+
+1. Filtered fastq files generated from `01_QualityTrimming.Rmd`
+2. Sample Name vector.
+
+##Output
+1. `asv_table`
+2. `asvs_fasta`
+3. `tax_table`
+4. `sample_data`
+
+#Set up the environment
+
+## Set the seed
+```{r, set-seed}
+set.seed(6572)
+
+```
+
+## Load packages
+```{r load-packages}
+pacman::p_load(tidyverse, devtools, dada2, 
+               patchwork, DT, install=FALSE)
+
+```
+
+#Load filtered Fastq files
+```{r load-filtered-fastqs}
+#place filtered fastq files into a variable
+#cheese_filtered_fastqs_path <- "data/01_DADA2/02_filtered_fastqs"
+
+#Intuition check
+filtered_fastqs_path
+
+#Create forward vector
+filtered_forward_reads <-
+  list.files(filtered_fastqs_path, pattern = "R1_filtered.fastq.gz" , 
+             full.names = TRUE)
+
+#Check
+filtered_forward_reads[1:5]
+
+#Reverse vector
+filtered_reverse_reads <-
+  list.files(filtered_fastqs_path, pattern = "R2_filtered.fastq.gz" , 
+             full.names = TRUE)
+
+#Check
+filtered_reverse_reads
+
+```
+
+#Assign sample names
+
+```{r sample-names}
+# Create vector of sample names from the filenames 
+sample_names <- sapply(strsplit(basename(filtered_forward_reads), "_"), `[`,1) 
+
+# Intuition Check 
+head(sample_names)
+```
+
+# Error modeling
+
+```{r learn-errors}
+#Forward Reads
+error_forward_reads <-
+  learnErrors(filtered_forward_reads, multithread = 6)
+
+#Plot
+forward_error_plot <-
+  plotErrors(error_forward_reads, nominalQ = TRUE) +
+  labs(title = "Forward Error Model")
+
+#Reverse Reads
+error_reverse_reads <-
+  learnErrors(filtered_reverse_reads, multithread = 6)
+
+#Plot
+reverse_error_plot <-
+  plotErrors(error_reverse_reads, nominalQ = TRUE) +
+  labs(title = "Reverse Error Reads")
+
+#Look at the plots together
+forward_error_plot + reverse_error_plot
+
+```
+
+#Infer sequencing reads
+
+```{r infer-ASVs}
+# Infer ASVs on the forward sequences
+dada_forward <- 
+  dada(filtered_forward_reads,
+        err = error_forward_reads, 
+        multithread = 6)
+
+# Take a look at the data
+typeof(dada_forward)
+dada_forward$`20210602-MA-CEB1F_R1_filtered.fastq.gz`
+
+
+#Reverse ASVs
+dada_reverse <-
+  dada(filtered_reverse_reads,
+       err = error_reverse_reads,
+       multithread = 6)
+
+#Take a look
+typeof(dada_reverse)
+dada_reverse[30]
+
+```
+
+
+# Merge Forward and Reverse ASVs
+
+```{r merge-ASVs}
+merged_ASVs <-
+  mergePairs(dada_forward, filtered_forward_reads,
+             dada_reverse, filtered_reverse_reads,
+             verbose = TRUE)
+
+#Evaluate the data output
+typeof(merged_ASVs)
+length (merged_ASVs)
+names(merged_ASVs)
+head(merged_ASVs[[3]])
+```
+
+#Create Raw ASV Count Table
+
+```{r raw-ASV-count-table}
+raw_ASV_table <- makeSequenceTable(merged_ASVs)
+
+#Check
+dim(raw_ASV_table)
+typeof(raw_ASV_table)
+class(raw_ASV_table)
+
+# Write out the raw ASV table
+write.table(raw_ASV_table, file = "data/01_DADA2/raw_ASV_counts.tsv" , 
+            sep = "\t" , quote = FALSE, col.names = NA)
+
+```
+
+
+# Asses the ASV length
+
+Some more QC!
+
+```{r assess-ASV-length}
+
+# Calculate summary stats
+maxLength_ASV <- max(nchar(getSequences(raw_ASV_table))) # Longest ASV?
+minLength_ASV <- min(nchar(getSequences(raw_ASV_table))) # Shortest ASV?
+meanLength_ASV <- mean(nchar(getSequences(raw_ASV_table))) # Mean ASV length?
+medianLength_ASV <- median(nchar(getSequences(raw_ASV_table))) # Median ASV length?
+
+# Create a table to Inspect the distribution of sequence lengths of all ASVs in dataset 
+table(nchar(getSequences(raw_ASV_table)))
+
+#Plot
+data.frame(ASV_Length = nchar(getSequences(raw_ASV_table))) %>%
+  ggplot(aes(x = ASV_Length)) +
+  geom_histogram() +
+  #modify x axis
+  scale_x_continuous(limits = c(0, 500)) +
+  labs(title = "Raw ASV Length" , 
+       y = "Number of ASVs", x = "ASV Sequence Length (bps)")
+  
+```
+
+# Trim ASVs
+
+```{r trim-ASVs}
+#Only pull ASVs that have a length of 245 bps
+raw_ASV_table_trimmed <-
+  raw_ASV_table[,nchar(getSequences(raw_ASV_table)) == 245]
+
+#Intuition check
+table(nchar(getSequences(raw_ASV_table_trimmed)))
+  
+```
+
+#Remove Chimeras
+
+```{r remove-chimeras}
+# Remove the chimeras in the raw ASV table
+noChimeras_ASV_table <- removeBimeraDenovo(raw_ASV_table_trimmed, 
+                                           method="consensus", 
+                                           multithread=TRUE, verbose=TRUE)
+
+# Check the dimensions
+dim(noChimeras_ASV_table)
+dim(raw_ASV_table_trimmed)
+#Difference tells us how many were cut from chimeras
+
+# What proportion is left of the sequences? 
+percRetained_chimerasTrimmed <- sum(noChimeras_ASV_table)/sum(raw_ASV_table_trimmed)
+percRetained_chimerasRaw <-sum(noChimeras_ASV_table)/sum(raw_ASV_table)
+
+# Plot 
+data.frame(Seq_Length_NoChim = nchar(getSequences(noChimeras_ASV_table))) %>%
+  ggplot(aes(x = Seq_Length_NoChim )) + 
+  geom_histogram()+ 
+  # include the x-axis scales
+  scale_x_continuous(limits = c(0, maxLength_ASV + 5)) + 
+  labs(title = "Trimmed + Chimera Removal distribution of ASV length",
+       y = "Number of ASVs", x = "ASV Sequence Length (bps)")
+```
+
+# Session Information
+
+```{r}
+
+```
+

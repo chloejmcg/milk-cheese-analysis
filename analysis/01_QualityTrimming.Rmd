@@ -7,23 +7,23 @@ output:
     code_folding: show
     theme: spacelab
     highlight: pygments
-    keep_md: no
-    toc: yes
+    toc: true
     toc_float:
-      collapsed: no
-      smooth_scroll: yes
+      collapsed: false
+      smooth_scroll: true
       toc_depth: 3
   keep_md: true  
 editor_options: 
   chunk_output_type: console
 ---
 
-
-```{r setup, include=FALSE}
+```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE,
                       fig.align = "center",
-                      fig.path = "../figures/01_QualityTrimming/") 
+                      #Send figures generated in this file to the folder below (use absolute pathway)
+                      fig.path = "/local/workdir/cjm423/milk-cheese-analysis/Milk-Cheese-Analysis/figures/01_QualityTrimming/") 
 ```
+
 
 #Setting up the Environment
 
@@ -38,15 +38,17 @@ start_time <- Sys.time()
 start_time
 ```
 
+
 #Load Outputs
 ```{r load}
+#install.packages("DT")
 pacman::p_load(tidyverse, dada2, phyloseq, patchwork, DT, devtools, install = FALSE)
 ```
 
 #Reading Raw Sequencing Files
 ```{r read}
-#Pathe to the fastq files
-raw_fastqs_path <- "data/cheese-fastq-gz"
+#Path to the fastq files
+raw_fastqs_path <- "/local/workdir/cjm423/milk-cheese-analysis/Milk-Cheese-Analysis/data/cheese-fastq-gz"
 raw_fastqs_path
 #Intuition check
 head(list.files(cheese_raw_fastqs_path))
@@ -162,19 +164,21 @@ This step looks good! Yay!
 #Paired
 filtered_reads <- filterAndTrim(forward_reads, filtered_forward_reads,
               reverse_reads, filtered_reverse_reads,
-              truncLen = c(200,200), trimLeft = c(19,20),
+              truncLen = c(185,185), trimLeft = c(19,20),
               maxN = 0, maxEE = c(1,1), truncQ = 2, 
               rm.phix = TRUE, compress = TRUE, 
               multithread = 8)
 
 ```
 
-#I chose these parameters for a few reasons. In the manuscript I am follwing, they did their expected error to be 2, trimmed the bps to 240, and did not specify any bioinformatics work with primers. Thank fully they used standard V4 primers of 515-806 bps. The Earth Microbiome project provided the reference primers basepairs. I was able to see that they did sequence the primers and cut them out in their analysis. 
+I chose these parameters for a few reasons. In the manuscript I am following, they did their expected error to be 2, trimmed the bps to 240, and did not specify any bioinformatics work with primers. Thank fully they used standard V4 primers of 515-806 bps. The Earth Microbiome project provided the reference primers base pairs. I was able to see that they did sequence the primers and cut them out in their analysis. 
 
-#Additionally, in the MultiQC and pre-qc plots generated in this analysis, showed that there is a significant amount of reads at the end of both the forward and reverse runs that a significant decrease in quality is observed. For the sake of this asssigment, I decided to be rigid in the analysis with an EE of 1 and trimming basepairs where there is an overall trend of decreasing quality score (phraed <20) and if later I was too strict in the cut off, I can always redo the analysis. 
+Additionally, in the MultiQC and pre-qc plots generated in this analysis, showed that there is a significant amount of reads at the end of both the forward and reverse runs that a significant decrease in quality is observed. For the sake of this assignment, I decided to be rigid in the analysis with an EE of 1 and trimming base pairs where there is an overall trend of decreasing quality score (phraed <20) and if later I was too strict in the cut off, I can always redo the analysis. 
 
-#Update, my initial parameters were too strict, I only had about a 3.5% retention rate in sequences so I decided to change TrunQ to 10 instead of 20, my truncLen to 220 bps which improved my renetion to 52%. 
----
+Update, my initial parameters were too strict, I only had about a 3.5% retention rate in sequences so I decided to change TrunQ to 2 instead of 20, my truncLen to 220 bps to try to cut out some of the rough ending base pairs (hopefully not cutting out the overlap region, but I can always adjust if needed).  
+
+Another update, after looking at the histogram of percentage of sequences retained, I deicded to truncate the sequence length to 185 bps to increase the overall percentage of base pairs retained. 
+
 
 ##Assess Trimmed Read Quality
 ```{r evaluate-trimmed bacteria}
@@ -190,7 +194,6 @@ reverse_filteredQual_plot_12 <-
 # Put the two plots together 
 forward_filteredQual_plot_12 + reverse_filteredQual_plot_12
 ```
-
 
 
 ##Aggregated Trimmed Plots
@@ -213,8 +216,12 @@ postQC_aggregate_plot <-
 # Show the plot
 postQC_aggregate_plot
 ```
+
 #Interpertation 2:
-#   NEED TO DO
+
+This post-QC quality score plot from 20 aggregated Illumina sequencing files shows the forward (left) and reverse (right) reads after quality filtering and trimming. Unfortunately, this data is not as high-quality as hoped for with from phraed scores dropping below desirable values around 130 basepairs. Around 165 basepairs, the phraed scores drop below 20, but there are concerns about the forward and reverse reads overlapping. This may be the best I can do for now in my trimming and filtering of this Brazilian cheese data set. 
+
+To further confirm that this dataset is filtered and trimmed appropriately, let’s take a look at the read retention of our QC step...
 
 ##Read Retention Post-QC
 ```{r read-retention}
@@ -270,19 +277,56 @@ percSeqs_QC_histplot <-
 numSeqs_QC_dotplot + numRetained_QC_histplot + percSeqs_QC_histplot + 
   plot_annotation(tag_levels = 'A')
 ```
-#Interpertation 3: NEED TO DO
+
+#Interpertation 3: 
+
+This figure presents three panels showing how many sequences were retained after quality filtering and trimming in the DADA2 pipeline. Let’s break down each panel:
+
 #   Panel A: Scatter Plot of Raw vs. Retained Sequences:
+
+Let's break down what we are looking at in Panel A. 
+
+  X-axis: Number of raw sequences before filtering.
+  Y-axis: Number of sequences retained after filtering.
+  Pink Line: The diagonal line represents perfect retention (i.e., no sequences lost).
+    
+Most points fall below the line, indicating that a many samples lost sequences during filtering. Minor losses are normal due to quality filtering. The closeness of the points also improved as I truncated the sequence langth to 185 down from 240 bps. 
 
 #   Panel B: Histogram of the Number of Sequences Retained per Sample
 
+In Panel B;
+
+  X-axis: Number of sequences retained per sample.
+  Y-axis: Number of samples with that many retained sequences.
+
+There seems to be a relative normal distribution of the number of sequences retained from 3,000 to 11,000 sequences. This indicates consistency in overall quality read. 
+
 #   Panel C: Histogram of Percent of Sequences Retained
+
+Lastly, in Panel C, we have...
+
+  X-axis: Proportion (%) of sequences retained per sample.
+  Y-axis: Number of samples at each proportion.
+
+Looking at the histogram, we have a consistent 75% retention rate in sequences. Since the quality score is already set quite low, and the truncation of the forward and reverse read sequences is trimmed for the primer length, per the Earth Microbiome Project. 
+
+Interestingly, the higher the sequence length, the less percentage of sequences retained. Whereas, when I made the sequence length less, to 185, the retention of sequences increased. While 75% data retention is not 90-100%, I feel confident in the filtering and trimming parameters that the data set is as clean as it can be wile maintaining the integrity of the raw data set. 
 
 ##Visualize QC differences in plot
 ```{r qc-differences}
 # Plot the pre and post together in one plot
 preQC_aggregate_plot / postQC_aggregate_plot
 ```
-#Interpertation 4: NEED TO DO
+
+#Interpertation 4: 
+
+This figure is comparing your pre-QC to your post-QC read quality. Here, in this location of your analyses, please insert a description of the interpretation you draw from yor overall quality control results. 
+
+Forward: The forward reads post-QC appear to be higher quality. There are less dips in phraed scores in the middle of the run, which shows that the QC worked! 
+
+Reverse: The reverse reads still have a significant amount of dips. However, the end of the reverse read does appear to have improved through filtering. 
+
+Overall, it is normal for the end of the reads to decline in quality, but I would say overall, the filtering step did it's job and cleaned the data set appropriately to continue on in the sequencing bioinformatics. 
 
 #Final Steps
 ```{r}
