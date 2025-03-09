@@ -51,7 +51,7 @@ pacman::p_load(tidyverse, dada2, phyloseq, patchwork, DT, devtools, install = FA
 raw_fastqs_path <- "/local/workdir/cjm423/milk-cheese-analysis/Milk-Cheese-Analysis/data/cheese-fastq-gz"
 raw_fastqs_path
 #Intuition check
-head(list.files(cheese_raw_fastqs_path))
+head(list.files(raw_fastqs_path))
 
 # How many files are there? 
 length(list.files(raw_fastqs_path))
