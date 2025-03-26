@@ -3,28 +3,121 @@ title: "Pre-processing ASVs with Phyloseq"
 author: "Chloe J McGovern"
 date: "2025-03-25"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, 
+                      fig.align = "center", 
+                      # write figures to the figures folder
+                      fig.path = "../figures/03_PreProcessing/")
 ```
 
-## R Markdown
+## Goals
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+First, we will use the phyloseq package to combine all of the data objects that we exported from the DADA2 workflow (`asv_table`, `tax_table`, and `metadata`) and incorporate them into a single specialized S4 R Data object, known as a phyloseq object. Then, we will remove any potential contaminants and evaluate the accuracy of our sequencing run. Finally, we will write our our single `raw_preprocessed_physeq` phyloseq data object. 
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+## Specific Steps: 
 
-```{r cars}
-summary(cars)
+1. Load in data that we've generated in `analysis/02_AssignASVs.Rmd` and fix all of the names to match each other. *The names must match for us to incorporate them into the S4 phyloseq object*: 
+    a. `asv_table`: ASVs (rows) x Samples (columns)
+    b. `tax_table`: ASV (rows) x Taxonomy (columns)
+    c. `metadata`: Samples (rows) x All our data (*e.g. pH, Temp, treatment group, etc*; columns)
+2. Combine the data into a phyloseq object. 
+3. Remove any contaminating ASVs that are **chloroplasts**. 
+4. Remove ASVs that are **mitochondria**. 
+5. Evaluate any ASVs from the **negative controls**. Then, remove negative controls. 
+6. Evaluate the mock community or **positive control** to learn the accuracy of sequencing. 
+7. Check for **reverse complements**. 
+8. Check the **sequencing depth** of samples. Remove samples that obviously have too few reads. 
+9. Write a `raw_preprocessed_physeq` to be used in the next step of our workflow. 
+
+## Input 
+
+1. **Metadata**: `metadata.csv` and `data/01_DADA2/track_read_counts.RData`.
+2. **ASV table**: `data/01_DADA2/ASV_table.csv` 
+3. **Taxonomy Table**: `data/01_DADA2/ASV_taxonomy.tsv`
+
+## Output 
+
+1. A **pre-processed S4 phyloseq object**: `raw_preprocessed_physeq.RData`.
+
+# Set Environment 
+
+## Load Packages 
+```{r load-packages}
+#install.packages("BiocManager")
+#BiocManager::install("Biostrings")
+
+#install.packages("ggpubr")
+#install.packages("rstatix")
+
+# Load packages 
+pacman::p_load(devtools, phyloseq, dada2, patchwork, Biostrings, tidyverse,
+               ggpubr, rstatix, install = FALSE)
 ```
 
-## Including Plots
+## Timing of this script
 
-You can also embed plots, for example:
+Let's record how long this file took to run on the class server, which we will record at the end of the script. 
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r rmd-start}
+# What time did we start running this script? 
+start_time <- Sys.time()
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+## 1. Load Data 
+
+### 1a. Metadata 
+
+Here, we will load in our **metadata** files, which include: 
+
+1. `data/metadata.csv`: This file contains all of our samples and also any measured variables, including station, date of collection, depth of sample, temperature, pH, salinity, etc. 
+2. `data/01_DADA2/track_read_counts.RData`: This file contains how many reads we maintained in our samples through the DADA2 workflow. 
+
+
+```{r load-metadata}
+# load in metadata
+metadata_df <- 
+  read_csv("data/metadata.csv") %>%
+  # Fix Column Name
+  dplyr::rename("Run" = "...1") %>%
+  # Add sample names also as a column 
+  mutate(names = sample_names)
+
+# Inspect 
+head(metadata_df)
+dim(metadata_df)
+
+# include dada2 output
+load("data/01_DADA2/track_read_counts.RData")
+
+# Take a look
+glimpse(track_counts_df)
+dim(track_counts_df)
+
+# Check filenames 
+head(track_counts_df$sample_names)
+
+# Fix sample names in track_reads 
+track_counts_df$sample_names <- sapply(strsplit(track_counts_df$sample_names, "_"), `[`, 1)
+
+# Intuition check 
+head(track_counts_df$sample_names)
+
+# What's different? 
+setdiff(track_counts_df$sample_names, metadata_df$sample_names)
+
+# Let's do a filtering join with left_join 
+metadata_final_df <- 
+  metadata_df %>%
+  left_join(., track_counts_df, by = "sample_names") %>%
+  # sample names to the rownames to merge into phyloseq
+  column_to_rownames(var = "sample_names")
+
+# Check 
+dim(metadata_final_df)
+```
+
