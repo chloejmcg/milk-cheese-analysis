@@ -110,7 +110,7 @@ The tree is unrooted! While the 515F/806R V4 primers CAN detect archaea, there a
 
 Are there any suspect branches in the raw, unrooted tree? Or does your tree look “clean”? Why or why not?
 
-There is one oddly long branch that I think we should investigate. 
+There is one oddly long branch that I think we should investigate. It sticks out quite further than any other branch and it's shared root node is very far away from it.  
 
 ## 4a. Evaluate Long Branches
 
@@ -285,6 +285,10 @@ midpoint_rooted_tree_node_plot <-
 # View it 
 midpoint_rooted_tree_node_plot
 ```
+
+Now that you’ve rooted your tree, does the tree seem “finalized”? Are there any other branches/ASVs to inspect? Why or why not? 
+
+The tree does seem finalized. I do worry about the weighting of branch length in downstream analysis if I should remove node 66 or trust my gut and the BLAST that tells me I should keep it for now since it is related to the potential community of (poorly processed) cheese. Other than that one, I think the rest fall within reason of their respective branches. 
 
 ## 7. Save phyloseq objects
 
