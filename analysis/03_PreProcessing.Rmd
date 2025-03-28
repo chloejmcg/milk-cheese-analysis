@@ -83,7 +83,7 @@ Here, we will load in our **metadata** files, which include:
 metadata_df <- 
   read_csv("data/metadata.csv") %>%
   # Fix Column Name
-  dplyr::rename("Run" = "...1") %>%
+  dplyr::rename("sample_names" = "Run") %>%
   # Add sample names also as a column 
   mutate(names = sample_names)
 
@@ -108,7 +108,7 @@ track_counts_df$sample_names <- sapply(strsplit(track_counts_df$sample_names, "_
 head(track_counts_df$sample_names)
 
 # What's different? 
-setdiff(track_counts_df$sample_names, metadata_df$sample_names)
+setdiff(track_counts_df$sample_names, metadata_df$sample_names) #yay! passed go!
 
 # Let's do a filtering join with left_join 
 metadata_final_df <- 
@@ -119,5 +119,259 @@ metadata_final_df <-
 
 # Check 
 dim(metadata_final_df)
+```
+
+## 1b. ASV Tables
+
+Load in the ASV count table that we created within DADA2 in `analysis/02_AssignASVs.Rmd`.
+
+
+```{r asv-table}
+asv_df <- 
+  read.delim(file = "data/01_DADA2/ASV_table.tsv", sep = "\t",
+           header = TRUE, row.names = 1)
+
+# Inspect 
+asv_df[1:3, 1:3]
+
+```
+
+Since samples do not start with numbers I do not need to change the sample names for better R understanding.
+
+## 1c. Taxonomy Table
+
+Let’s also load the taxonomy table that we created in `analysis/02_AssignASVs.Rmd`.
+
+```{r taxonomy-table}
+tax_df <- 
+  read.delim("data/01_DADA2/ASV_taxonomy.tsv", sep = "\t",
+           header = TRUE, row.names = 1) 
+
+# Inspect
+dim(tax_df)
+
+dim(asv_df) # yay! they match
+
+# Double checking using code (no human error)
+stopifnot(rownames(asv_df) == rownames(tax_df)) #no news is good news
+```
+
+# 2. Handoff to phyloseq
+
+This is where I will combine  my `metadata`, `asv count table`, and `taxonomy table` into a single data S4 data object in R, which will be called `raw_physeq` for now.
+
+```{r raw-physeq}
+raw_physeq <- 
+  phyloseq(otu_table(asv_df, taxa_are_rows = TRUE),
+         sample_data(metadata_final_df),
+         tax_table(as.matrix(tax_df)))
+
+# Check out 
+raw_physeq
+
+# save 
+save(raw_physeq, file = "data/03_PreProcessing/raw_physeq.RData")
+```
+
+# Now it is time to clean the data! 
+
+Chloroplasts and mitochondria need to be removed from 16S datasets because they contain their own 16S rRNA genes, which are evolutionarily derived from bacteria. These organelles can be unintentionally amplified during PCR, especially in samples from plants (chloroplasts) or animals (mitochondria), leading to misleading results by inflating microbial diversity.
+
+# 3.  Remove chloroplasts
+
+```{r rm-chloroplast}
+noChloros_physeq <- 
+  raw_physeq %>%
+  subset_taxa(Order != "Chloroplast" | is.na(Order))
+
+# How many ASVs were chloroplasts? 
+numChloros_ASVs <- ntaxa(raw_physeq) - ntaxa(noChloros_physeq)
+```
+
+There were 0 chloroplasts. 
+
+# 4. Mitochondria
+
+```{r rm-mitochondria}
+noChlorosMitos_physeq <-  
+  noChloros_physeq %>%
+  subset_taxa(Family != "Mitochondria" | is.na(Family)) 
+
+# How many ASVs were mitochondria? 
+numMitos_ASVs <- ntaxa(noChloros_physeq) - ntaxa(noChlorosMitos_physeq)
+```
+
+There were 0 mitochondrias. 
+
+How many chloroplast and/or mitochondrial ASVs in your dataset? Does this seem reasonable? 
+
+There were no chloroplasts or mitochondria cleaned from the sequencing data! This at first made sense if they cultured the bacteria on plates and then did the DNA extraction from a pellet of cells. To confirm this thought, I went back to the manuscript I am re-analyzing and it turns out they did not culture the bacteria. Rather there was 100 g of cheese samples homogenized in water, filtered with a sieve and gauze, then centrifuged. The pellet was diluted and aliquoted for DNA extraction.
+
+This method would likely retain intact microbial cells, fat/protein matrix fragments, and even some host-derived (milk) material. 
+
+So I continued reading in the manuscript when I caught this sentence: "F515 and R806 primers, both modified to contain an Illumina adapter region". It turns out they cited a paper in `2.4. Library preparation and 16S rRNA sequencing` section, Caporaso, et al., 2011, where they used primers that suppress non-bacterial amplification. 
+
+Overall, this would mean that 0 chloroplasts and mitochondria detected was not a mistake but rather an expected result based on the primer design.
+
+# 5. Remove controls
+
+Did your dataset have any negative controls? If so, how many ASVs did you remove? Does that seem reasonable to you?
+
+This data et does not have any controls, so I am not going to have any code here to run. Always include controls! There are no ASVs that will be eliminated. 
+
+The data object for continuing the analysis will be `noChlorosMitos_physeq`.
+
+# 6. Positive controls
+
+Did your dataset have a mock community? If so, what can you say about the accuracy of your sequencing run? 
+
+No! This dataset did not have a mock community or any other form of a positive control. 
+
+Overall, I would say this sequencing run is getting scarier at every step. From the incredibly low quality, no missing controls, unfortunately I can say that this is what I expected once I dove into this data. 
+
+The data object for continuing the analysis will be `noChlorosMitos_physeq`.
+
+# 7. Reverse compliments
+
+```{r reverse-compliments}
+# Pull out Taxa Table
+tax_table <- 
+  noChlorosMitos_physeq %>%
+  tax_table() %>% 
+  data.frame()
+
+# Grab ASV Sequences and Names
+asv_names <- tax_table$ASV
+asv_seqs <- tax_table$ASVseqs
+
+# Create empty comparison matrix
+asv_rev_comp <- matrix(nrow=length(asv_seqs), ncol = length(asv_seqs)) 
+
+# Fix the names in the rows and columns 
+rownames(asv_rev_comp) <- asv_names
+colnames(asv_rev_comp) <- asv_names
+
+# Convert sequences to Biostrings
+asv_dna <- DNAStringSet(asv_seqs) 
+
+# Inspect 
+head(asv_dna)
+
+# Construct reverse complement
+asv_rev_dna <- reverseComplement(asv_dna) 
+
+# Now loop through every asv sequence to check 
+for(i in 1:length(asv_seqs)){ # For each asv sequence...
+  match_vec <- asv_dna[i] == asv_rev_dna # Compare it to the reverse complement of every other sequence...
+  asv_rev_comp[,i] <- match_vec # Write that logical vector as a new column 
+}
+
+# Find how many TRUEs (matches) we have, divide by 2 because each pair occurs twice
+cat("For", sum(asv_rev_comp) / 2,"ASVs, the reverse complement will need to be removed") 
+```
+
+Do you have any reverse complements in your dataset? 
+
+Nope! For 0 ASVs, the reverse complement will need to be removed. 
+
+# 8. Sequencing depth
+
+```{r seq-depth}
+# The current data object
+noChlorosMitos_physeq
+
+# What is the library size/sequencing depth for each sample? 
+seqSums_df <- 
+  noChlorosMitos_physeq %>%
+  otu_table() %>%
+  # Sum each sample column 
+  colSums() %>%
+  data.frame() %>%
+  rownames_to_column(var = "names") %>%
+  left_join(., metadata_final_df, by = "names") 
+
+# Rename second column 
+colnames(seqSums_df)[2] <- "TotalSeqs"
+
+# check
+dim(seqSums_df)
+head(seqSums_df)
+
+# Show the depth of samples 
+seqSums_df %>%
+  dplyr::select(names, TotalSeqs) %>%
+  arrange(TotalSeqs) %>%
+  head()
+
+# plot it as a bar plot 
+numSeq_bar_plot <- 
+  seqSums_df %>%
+  ggplot(aes(x=reorder(names, TotalSeqs), y = TotalSeqs,
+             fill = cheese_id)) + 
+  geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_blank()) + 
+  labs(y = "Read Depth", x = "Sample") + 
+  theme(legend.position = "none")
+
+# histogram
+numSeq_hist_plot <- 
+  seqSums_df %>%
+  ggplot(aes(x= TotalSeqs, fill = cheese_id)) + 
+  geom_histogram(color = "black") + 
+  labs(y = "# of Samples", x = "Read Depth") + 
+  theme(legend.position = "bottom")
+
+# Density plot 
+numSeq_density_plot <- 
+  seqSums_df %>%
+  ggplot(aes(TotalSeqs, fill = cheese_id)) +
+  geom_density(alpha = 0.5) + 
+  labs(x = "Read Depth") + 
+  theme(legend.position = "none")
+
+# Put it all together 
+numSeq_bar_plot + numSeq_hist_plot + numSeq_density_plot + 
+  plot_annotation(tag_levels = "A") 
+
+```
+
+What can you conclude about your sequencing depths? What are your sample distributions? Do you have “enough” reads? Are there any samples that should be removed at this step?
+
+In microbiome studies, it's common to consider >10,000 or >20,000 reads per sample as sufficient, depending on community complexity. These samples mostly have 50,000+ reads, which is more than adequate for cheese microbiomes. I think the outlier sample is still well above 30,000 reads so I think it is okay to leave it and not filter any samples out. 
+
+I am more concerned about all of my metadata not having any data...I should have picked a different paper. 
+
+# Remove samples with few reads
+
+I think all of the sequences are fine depth wise, so I will not be removing any samples. 
+
+# 9. Save output
+
+## Raw Preprocessed Phyloseq Object
+
+```{r save-raw-preprocessed-phyloseq}
+#change object name so that it matches Mar's workflow
+raw_preprocessed_physeq <- 
+  noChlorosMitos_physeq
+
+save(raw_preprocessed_physeq, file = "data/03_PreProcessing/raw_preprocessed_physeq.RData")
+```
+
+# Final info for Reproducibility
+
+## Check render rime
+
+```{r render-time}
+end_time <- Sys.time()
+end_time 
+
+elapsed_time <- round((end_time - start_time), 3)
+elapsed_time
+```
+
+# Session information
+
+```{r session-info}
+devtools::session_info()
 ```
 
