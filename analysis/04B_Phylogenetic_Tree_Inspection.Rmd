@@ -139,21 +139,20 @@ viewClade(kingdom_node_tree +
 
 # This plot is too zoomed in! Let's try to zoom out by looking at ancestors
 # Lets see its ancestors, which will tell us each node as it steps up. 
-tidytree::ancestor(unrooted_tree, 66) 
+tidytree::ancestor(unrooted_tree, 66) #162, 160, 113, 111 ancestors
 
 # Let's evaluate 162!
-viewClade(kingdom_node_tree, 162)
+viewClade(kingdom_node_tree, 162) #162 related to 65 and long branch 66
 ```
 
 
 ```{r pull-node66}
 # Or if there are two nodes that we can see we can find its MRCA 
-  ## let's do 66 and 162 for the purpose of getting some extra practice
 ## create tibble of tree to identify offspring
 tree_tib <- as_tibble(unrooted_physeq@phy_tree)
 
 # Inspect
-head(tree_tib)
+head(tree_tib) #node 66 related to 162 parent, ASV_0093
 str(tree_tib)
 
 # lets look at the long branch
@@ -192,21 +191,19 @@ unrooted_physeq %>%
 node_162_df 
 ```
 
-There are a lot of sequences that came up, so this may be a legitimate sequence! But just to be sure let's BLAST it confirm our findings. 
+Node 66 is attached to ASV_0093. The sequence associated is "TACGTAGGGGGCGAGCGTTGTCCGGAGTTACTGGGCGTAAAGGGCCTGCAGGCGGTCTGGTGCGTTTCGGCGGACAGCTGGTGGCTTAACTACCAGAGGGGCCGAAAGACGATCAGACTTGAGGGCCAGAGAGGGACCTGGAATTCCGGGTGGAGCGGTGAAATGCGTAGAGATCCGGAGGAACACCGAAGGCGAAGGCAGGGTCCTGGCTGGCGACTGACGCTGAGGGGCGAAAGCTAGGGGAGCGAACGGG" 
+
+Let's BLAST it confirm that this is a legitimate ASV in this system.  
 
 # BLAST
 
-Now, copy and paste the ASV sequences into NCBI’s Standard Nucleotide BLAST. 
-
-Oddly enough, all the ASVs came back as probable sequences for the system. Primarily E. coli, Pseudomonas, Klebsiella, Acinetobacter, and Enterobacter. Our tree looks legitimate and we do not need to remove ASVs that were found. 
+Now, copy and paste the ASV sequences into NCBI’s Standard Nucleotide BLAST. I had re-blasted the sequence for ASV 93 and it turns out that it is NOT a known sequence. However, it has a 100% query cover percentage to tens of sequences noted as "unidentified bacterium", as well as a very small E value, indicating this ASV is significant and unlikely to be due to chance. 
 
 ## 4b. Prune your tree
 
-No ASVs need to be removed, so no nodes will be removed at this step--but here is where I could do that. 
-
 Were there any long branches in the unrooted tree? If so, did you decide to remove any ASVs from your tree? Why or why not? What data convinced you to remove each of the ASVs?
 
-Branch 66 looks to be a long but after inspecting the ASV and BLAST-ing the sequence, it does seem to be a legitimate potential contaminant in cheese. I am not going to remove an ASVs from my tree. 
+Branch 66 looks to be a long but after inspecting the ASV and BLAST-ing the sequence, I have decided to keep it. So I will fast forward to midpoint rooting analysis since I have no archaea. 
 
 # 5. Root the Tree
 
