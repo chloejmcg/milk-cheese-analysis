@@ -1,0 +1,375 @@
+---
+title: "Sample Diversity"
+author: "Chloe J McGovern"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.path = "../figures/05_Biodiversity")
+```
+
+# Goals 
+
+Run an analysis on the within-sample biodiversity of the cheese samples. 
+
+1. Calculate the Hill Numbers of the samples using the iNEXT package. 
+2. Plot and evaluate the interpolated and extrapolated rarefaction curves from iNEXT. 
+3. Test and then answer the scientific question at hand. (But first determine the normality of the data).
+
+## Inputs 
+
+1. We will need the `phytree_preprocessed_physeq`, which includes a rooted tree (ideally within the archaea!) that we created in `analysis/04B_Phylogenetic_Tree_Inspection.Rmd`. 
+
+## Outputs 
+
+1. Calculated biodiversity measures (Hill numbers) across every sample. 
+2. Figures to include in our scientific paper that visualize the data as it relates to the scientific question.
+3. Statistical tests conveying the measured and quantified changes and patterns in biodiversity.
+
+# Scientific Question
+
+## Question & Hypotheses
+
+How is microbial biodiversity changed across different cheese types?
+
+- *Null Hypothesis:* The microbial community does not change with cheese type.
+
+- *Alternative Hypothesis:* Different cheese types have different microbial communities. 
+
+
+# Set up the Environment 
+
+## Timing of this script
+
+```{r rmd-start}
+# What time did we start running this script? 
+start_time <- Sys.time()
+```
+
+## Set the seed 
+```{r set-seed}
+set.seed(238428)
+```
+
+## Load Packages & Colors 
+
+```{r load-packages-colors}
+# install packages for stats
+#install.packages("rstatix")
+#install.packages("ggpubr")
+
+pacman::p_load(tidyverse, devtools, patchwork, iNEXT, phyloseq,
+               # packages for stats
+               ggpubr, rstatix, install = FALSE)
+
+# Load in colors for plotting 
+source("code/colors.R")
+```
+
+## Load in Data 
+
+```{r load-data}
+load("data/04_PhylogeneticTree/phytree_preprocessed_physeqs.RData")
+
+# take a look at it! 
+midpoint_rooted_physeq
+
+# Intuition check on seq depth
+min(sample_sums(midpoint_rooted_physeq))
+
+# Make a metadata dataframe 
+metadata_df <- 
+  midpoint_rooted_physeq %>%
+  sample_data() %>%
+  data.frame()
+
+# view of it
+glimpse(metadata_df)
+
+# since missing code line for cheese type, hard code a new column called cheese_name
+metadata_df <- metadata_df %>%
+  mutate(cheese_type = case_when(
+    Sample.Name %in% c("Q4", "Q5", "Q6", "Q7", "Q8") ~ "Colonial",
+    Sample.Name %in% c("Q1", "Q10", "Q2", "Q3", "Q9") ~ "Feta-type",
+    Sample.Name %in% c("Q15", "Q14", "Q13", "Q12", "Q11") ~ "Fresh",
+    Sample.Name %in% c("Q16", "Q17", "Q18", "Q19", "Q20") ~ "Pecorino-type"
+  ))
+
+# View(metadata_df) YAY it worked!! 
+```
+
+# Biodiversity Hill Numbers with iNEXT
+
+iNEXT takes 
+
+```{r iNEXT-biodiversity}
+# prepare the input data 
+# Species in rows and the samples in columns 
+iNEXT_input_df <- 
+  midpoint_rooted_physeq %>%
+  otu_table() %>%
+  data.frame()
+
+# Inpect 
+dim(iNEXT_input_df)
+iNEXT_input_df[1:5, 1:5]
+
+# Run iNEXT : Remember to set the seed! It matters a lot for iNEXT -- and it may take some time to run
+
+iNEXT_data <- iNEXT(iNEXT_input_df, 
+                   q = c(0, 1, 2),
+                   datatype = "abundance")
+
+# Inspect 
+str(iNEXT_data)
+typeof(iNEXT_data)
+```
+
+# Rarefaction Curves 
+
+## `ggiNEXT` Rarefaction Curves 
+
+```{r iNEXT-colors}
+# Prepare Colors 
+color_df <- 
+  iNEXT_input_df %>%
+  colnames() %>%
+  data.frame()
+# Check
+head(color_df)
+# Rename the column 
+colnames(color_df)[1] <- "names"
+# Check
+head(color_df)
+
+
+# Make a helper dataframe for plotting with colors 
+iNEXT_color_df <- 
+  color_df %>%
+  # Merge with metadata
+  left_join(metadata_df, by = "names") %>%
+  # Merge with colors for plotting with ggiNEXT
+  left_join(data.frame(cheese_colors = cheese_colors,
+            cheese_type = names(cheese_colors)),
+            by = "cheese_type")
+
+head(iNEXT_color_df)
+```
+
+```{r plot-iNEXT-rarefaction}
+ggiNEXT(iNEXT_data, type = 1, facet.var = "Order.q") + 
+  scale_color_manual(values = iNEXT_color_df$cheese_colors) + 
+  scale_fill_manual(values = iNEXT_color_df$cheese_colors) + 
+  scale_shape_manual(values = base::rep(17, nsamples(midpoint_rooted_physeq))) + 
+  theme_bw() + 
+  theme(legend.position = "none") + 
+  labs(y = "Effective Number of ASVs", x = "Number of Sequences") 
+```
+
+
+## Manual Rarefaction Curves 
+
+```{r manual-rarefaction}
+str(iNEXT_data)
+
+iNEXT_manual_df <- 
+  iNEXT_data$iNextEst$size_based %>%
+  dplyr::rename(names = Assemblage) %>%
+  # fix the samples to merge with metadata 
+  mutate(names = gsub(names, pattern = "[.]", replace = "-"),
+         names = gsub(names, pattern = "X", replace = "")) %>%
+  # join with the metadata
+  left_join(., metadata_df, by = "names") %>%
+  mutate(cheese_type = factor(cheese_type, levels = c("Colonial",
+                                              "Feta-type",
+                                              "Fresh",
+                                              "Pecorino-type")))
+
+# Inspection
+dim(iNEXT_manual_df)
+
+# Manually plot rarefaction curves 
+iNEXT_manual_df %>%
+  dplyr::filter(Method == "Rarefaction") %>%
+  ggplot(aes(x = m, y = qD, color = cheese_type, group = names)) + 
+  geom_line() + 
+  facet_grid(Order.q~cheese_type, scales = "free") + 
+  scale_color_manual(values = cheese_colors) + 
+  theme_bw() + 
+  labs(y = "Effective Number of ASVs", x = "Number of Sequences") + 
+  theme(legend.position = "bottom")
+```
+
+Interpretation 1: 
+
+    **ggiNEXT curve** Looking at this figure, initially I notice a significant drop in the effective numer of ASVs as we look at Shannon and Simpson values. The rarefaction curves (especially for q = 0) show that most samples plateau, meaning they should be sequenced deeply enough to capture most of the ASVs present in the cheese samples. The dashed extrapolated lines stay close to the observed curves means that additional sequencing would not likely change the richness conclusions dramatically--meaning *yes!* these sequences appear to be sequenced deep enough for analysis. Also, most samples have 50,000 reads (or are in tha range) which is a sufficent number of sequences to work with. Looking at Shannon Diversity, q = 1, the effective number os ASVs significantly drop from the richness indicators, meaning that there is low evenness in the samples. While some cheese types contained a greater number of ASVs overall, a small number of dominant taxa contributed disproportionately to total community composition. This uneven distribution is consistent with the selective microbial environments of fermented dairy products, where lactic acid bacteria often dominate. The Simpson diversity also factors in the dominance factor in the ASVs. There are 5 or less effective ASVs in these rarefaction curves, which highlights there are very few species dominating the matrix. Again this makes sense in fermented foods where lactic acid bacteria are dominant in the matrix, and less abundanct ASVs that aren't accounted for in these measurements are likely contaminants. 
+
+
+    **Manual Rarefaction Curve** When comparing cheese types, Feta-type samples exhibited the highest ASV richness, though Shannon (q = 1) and Simpson (q = 2) diversity values were considerably lower, indicating uneven communities with dominant taxa. Fresh cheeses showed the lowest microbial diversity across all diversity orders, while Colonial and Pecorino-type cheeses fell in between. The consistently low Simpson diversity across all cheeses underscores the dominance of a few microbial species in fermented dairy environments.
+
+# Statististical Testing
+
+Understanding the difference between parametric and non-parametric statistics is essential for choosing the right test for your data, especially in microbial ecology where data often violate assumptions of normality.
+
+In order to know if I need to use parametric or non-parametric tests, first I need to test for the normality of the data. However, Shapiro-Wilk's test is only good for continuous data; this may be better suited for more well rounded cheese metadata with factors like pH, aging, moisture content. My metadata is only categorical for cheese type so the statistics will be limited. 
+
+
+I should be able to test if the richness values are normal so let's do that here so I know if I can use parametric or non-parametric methods for categorical data statistics. 
+
+### Shaprio-Wilk 
+
+```{r shapiro-wilk-richness}
+### Now what about for richness? 
+obs_div_df <- 
+  iNEXT_manual_df %>%
+  dplyr::filter(Method == "Observed") 
+
+# check it
+glimpse(obs_div_df)
+
+# Pull out unique data from the three fractions of samples 
+obs_whole_rich_df <- 
+  obs_div_df %>%
+  dplyr::filter(Order.q == 0)
+
+# Test of the data is normal for the continuous value of richness
+shapiro.test(obs_whole_rich_df$qD)
+
+```
+
+The data is not normal. I will have to use non-parametric statistics.
+
+# Categorical Analysis by Cheese Type
+
+### Diversity by Cheese Type
+
+```{r make-obs-df}
+# Plot boxplots by cheese type against diversity
+obs_div_df %>%
+  ggplot(aes(x = cheese_type, y = qD, fill = cheese_type, 
+             color = cheese_type)) + 
+  facet_wrap(.~Order.q, scales = "free_y") + 
+  geom_jitter() + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + 
+  scale_color_manual(values = cheese_colors) + 
+  scale_fill_manual(values = cheese_colors) + 
+  labs(y = "Effective Number of ASVs") + 
+  theme_bw() + 
+  theme(legend.position = "bottom",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 30,
+                                   hjust = 1, 
+                                   vjust = 1))
+```
+
+
+#### Statistically test Richness
+
+
+```{r cheese-diversity-richness, fig.height=4, fig.width=4}
+# Pull out richness data 
+obs_rich_df <- 
+  obs_div_df %>%
+  dplyr::filter(Order.q == 0)
+
+# Run Kruskal-Wallis test
+kruskal_cheese_rich <- kruskal.test(qD ~ cheese_type, data = obs_rich_df)
+
+# Look at it 
+kruskal_cheese_rich
+
+# Richness by cheese type (Kruskal + Dunn)
+rich_ggboxplot <- 
+  ggboxplot(obs_rich_df, x = "cheese_type", y = "qD", 
+          color = "cheese_type", fill = "cheese_type", alpha = 0.3,
+          outlier.shape = NA) + 
+  geom_jitter(aes(color = cheese_type)) + 
+  scale_color_manual(values = cheese_colors) + 
+  scale_fill_manual(values = cheese_colors) + 
+  labs(y = "# of Total ASVs (Richness)") + 
+  # Add Kruskal-Wallis test
+  stat_compare_means(method = "kruskal.test", label.y = min(obs_rich_df$qD)) + 
+  # Add Dunn test comparisons
+  geom_pwc(
+    aes(group = cheese_type), tip.length = 0, hide.ns = TRUE,
+    method = "dunn_test", label = "p.adj.format",
+    p.adjust.method = "fdr", bracket.nudge.y = -0.08) + 
+  theme_bw() + 
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 30,
+                                   hjust = 1, 
+                                   vjust = 1))
+```
+
+### Simpson
+```{r cheese-diversity-simpson, fig.height=4, fig.width=4}
+# Pull out simpson data 
+obs_simps_df <- 
+  obs_div_df %>%
+  dplyr::filter(Order.q == 2)
+
+# Run Kruskal-Wallis test
+kruskal_cheese_simps <- kruskal.test(qD ~ cheese_type, data = obs_simps_df)
+
+# Look at it 
+kruskal_cheese_simps
+
+# Simpson by cheese type (Kruskal + Dunn)
+simps_ggboxplot <- 
+  ggboxplot(obs_simps_df, x = "cheese_type", y = "qD", 
+          color = "cheese_type", fill = "cheese_type", alpha = 0.3,
+          outlier.shape = NA) + 
+  geom_jitter(aes(color = cheese_type)) + 
+  scale_color_manual(values = cheese_colors) + 
+  scale_fill_manual(values = cheese_colors) + 
+  labs(y = "# of Dominant ASVs (Simpson)") +
+  stat_compare_means(method = "kruskal.test", label.y = max(obs_simps_df$qD) * 1.02) + 
+  geom_pwc(
+    aes(group = cheese_type), tip.length = 0, hide.ns = TRUE,
+    method = "dunn_test", label = "p.adj.signif",
+    step.increase = 0.08,
+    p.adjust.method = "fdr", bracket.nudge.y = -0.08) + 
+  theme_bw() + 
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 30,
+                                   hjust = 1, 
+                                   vjust = 1))
+```
+
+```{r plot-rich-simps, fig.width=8, fig.height=4}
+# Show the plots
+rich_ggboxplot + simps_ggboxplot
+```
+
+Interpretation 2: Looking at richness, feta-type cheeses harbor more total bacterial taxa (including both rare and common ASVs), whereas the others have fewer total ASVs. This points to higher overall microbial richness in Feta-type cheese. Despite big differences in total richness, all cheese types have a similar core of dominant bacterial species. In other words, no matter the cheese type, one or two ASVs tend to dominate—an expected trend of fermented dairy. 
+
+
+Interpretation 3: I did a Kruskall Wallis with the Dunn pairwise test. I did this because my continuous variable of richness is not normal (p > 0.05). 
+
+Since my data is categorical, I will not run further analyses. 
+
+# Final info for Reproducibility 
+
+## Check Render Time
+```{r stop-time}
+# Take the time now that we are at the end of the script
+end_time <- Sys.time()
+end_time 
+
+# Echo the elapsed time
+elapsed_time <- round((end_time - start_time), 3)
+elapsed_time
+```
+
+## Session Information
+
+```{r session-info}
+# Ensure reproducibility with package version information
+devtools::session_info()
+```
