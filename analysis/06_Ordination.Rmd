@@ -1,0 +1,560 @@
+---
+title: "Untitled"
+author: "Chloe J McGovern"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.path = "../figures/06_Ordination")
+```
+
+# Goals
+
+1. Load in phyloseq data with rooted tree & colors and functions.  
+2. Evaluate sequencing depth and remove samples, if needed.  
+3. Normalize the read counts between samples.  
+4. Calculate community **dis**similarities. Numbers between 0 and 1. If 0, completely similar versus if they are 1, then they're completely dissimilar.   
+    a. **Sorensen**: Shared Species as a binary value: Abundance-unweighted 
+    b. **Bray-Curtis**: Shared Abundant species: Abundance-weighted
+    c. **(Abundance-)Weighted UNIFRAC**: Consider Abundant Species and where they fall on the tree  
+5. Run statistics with functions from the vegan R package: 
+    a. PERMANOVA with `adonis2()`.
+    b. betadispR with `betadisper()` and `permutest()`. 
+6. Visualize the community data with two unconstrained Ordinations:  
+    a. **PCoA**: Linear Method. Eigenvalue = how much variation is explained by each axis. Choose to view axis 1, 2, 3, etc. and plot them together.  
+    b. **NMDS**: Non-linear. Smush multiple Dimensions into 2 or 3 axes. Need to report Stress value (ideally <0.15).  
+
+## Inputs
+
+1. We will need the `phytree_preprocessed_physeq.RData`, which includes a midpoint rooted tree  that we created in `analysis/04B_Phylogenetic_Tree_Inspection.Rmd`. 
+
+NOTE: metadata may need to be hard coded in so I hope I don't forget in the analysis when/if I get a error.
+
+## Outputs
+
+1. Calculated beta-diversity dissimilarity measures (*e.g.* Sorensen, Bray-Curtis, abundance-unweighted and -weighted UniFrac) across every sample. 
+2. Ordination figures (*i.e.,* PCoA/NMDS) to include in the scientific paper that visualize the data as it relates to the scientific question.
+3. Statistical tests (*i.e.,* PERMANOVA & betadisper) conveying the measured and quantified changes and patterns in biodiversity.
+
+# Scientific Question
+
+## Question & Hypotheses
+
+How is microbial biodiversity changed across different cheese types?
+
+- *Null Hypothesis:* The microbial community does not change with cheese type.
+
+- *Alternative Hypothesis:* Different cheese types have different microbial communities. 
+
+Interpretation 1: My hypothesis is that different cheese types WILL have different microbial communities. Or at least should...? Cheese is both delicious and complicated! There are varying moisture, textures, eyes/no eyes, tastes, rinds, no rinds...the list is extensive of the variation in cheese! I don't know if the cheese types in this paper are distinct enough to detect the differences, but I think it is a valid hypothesis. One of the great things, is that supplemented with wet lab experiments, this paper could extend beyond the presence/absence and abundance it currently focuses on in terms of diversity. It could extend to phyogeny if additional characteristics were analyzed which could be kinda cool--the phylogeny of cheese bacteria!
+
+# Set up 
+
+## Timing of this script
+
+```{r rmd-start}
+# What time did we start running this script? 
+start_time <- Sys.time()
+```
+
+## Set the seed
+
+```{r set-seed}
+set.seed(238428)
+```
+
+## Load Packages, colors & functions  
+```{r load-packages}
+pacman::p_load(tidyverse, devtools, phyloseq, patchwork, vegan, 
+               install = FALSE)
+
+# Load Colors 
+source("code/colors.R")
+
+# Load functions 
+source("code/functions.R")
+```
+
+# 1. Load in the data 
+
+```{r load-data}
+# load phyloseq object
+load("data/04_PhylogeneticTree/phytree_preprocessed_physeqs.RData")
+midpoint_rooted_physeq
+
+# Intuition check on seq depth
+min(sample_sums(midpoint_rooted_physeq))
+
+```
+
+# Normalize Read Depths
+
+## 2. Explore the Raw Read Counts
+
+```{r explore-read-counts, fig.width=6, fig.height=3}
+# Create Metadata_df 
+metadata_df <- 
+  midpoint_rooted_physeq %>%
+  sample_data() %>%
+  data.frame()
+
+#hard code in the cheese type from the manuscript, maybe should've imported it from "05_Biodiversity"
+metadata_df <- metadata_df %>%
+  mutate(cheese_type = case_when(
+    Sample.Name %in% c("Q4", "Q5", "Q6", "Q7", "Q8") ~ "Colonial",
+    Sample.Name %in% c("Q1", "Q10", "Q2", "Q3", "Q9") ~ "Feta-type",
+    Sample.Name %in% c("Q15", "Q14", "Q13", "Q12", "Q11") ~ "Fresh",
+    Sample.Name %in% c("Q16", "Q17", "Q18", "Q19", "Q20") ~ "Pecorino-type"
+  ))
+
+# calculate read counts per sample 
+raw_TotalSeqs_df <- 
+  midpoint_rooted_physeq %>%
+  # Calcuate the total number of sequences/reads
+  sample_sums() %>%
+  data.frame()
+
+# Take a look 
+head(raw_TotalSeqs_df)
+
+# Rename the column 
+colnames(raw_TotalSeqs_df)[1] <- "TotalSeqs"
+
+# just a peek to make sure
+head(raw_TotalSeqs_df) #yay!
+
+# add a new column of num_ASVs (RAW, non-noramlized # ASVs)
+raw_TotalSeqsASVs_df <- 
+  raw_TotalSeqs_df %>%
+  mutate(num_ASVs = colSums(otu_table(midpoint_rooted_physeq) > 1))
+
+#View(raw_TotalSeqsASVs_df) looks good!
+
+# Plot histogram of seq depth 
+rawSeq_histogram <- 
+  raw_TotalSeqsASVs_df %>%
+  ggplot(aes(x = TotalSeqs)) + 
+  geom_histogram(bins = 50) + 
+  labs(title = "Raw Seq Depth Histogram") + 
+  theme_bw()
+
+# Plot Seq Depth versus num_ASVs
+rawSeq_vs_numASV_plot <- 
+  raw_TotalSeqsASVs_df %>%
+  ggplot(aes(x = num_ASVs, y = TotalSeqs)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") + 
+  labs(title = "Seq Depth vs # ASVs") + 
+  theme_bw()
+
+# is it significant? 
+summary(lm(TotalSeqs ~ num_ASVs, data = raw_TotalSeqsASVs_df))
+
+# Put the two plots together.
+rawSeq_histogram + rawSeq_vs_numASV_plot +
+  plot_annotation(tag_levels = "A")
+```
+
+Interpretation 2: I will scale the reads to the minimum read depth of 32,004 reads. While it is an outlier in terms of the number of reads, the ASV count is on par with the rest of the samples. Therefore, I am not going to remove that sample and keep it as my scaling reference. While I do think scaling a sample with 80,000 reads down to 32,000 reads is something to be aware of, fortunately I do think it is still enough read depth for beta diversity metrics like Bray Curtis. Cheese samples have relatively low diversity making the scaling less of a concern with high read depths. 
+
+
+# 3. Scale Read Counts 
+
+```{r scale-reads, fig.width=6, fig.height=3}
+min(sample_sums(midpoint_rooted_physeq))
+
+# Scale the reads 
+scaled_physeq <- 
+  midpoint_rooted_physeq %>%
+  scale_reads(round = "matround")
+
+# Look at it 
+scaled_physeq
+
+# Look at it more!
+#View(data.frame(otu_table(midpoint_rooted_physeq)))
+#View(data.frame(otu_table(scaled_physeq)))
+
+# Confirm seq read depth of scaled_physeq 
+scaled_TotalSeqs_df <- 
+  scaled_physeq %>%
+  sample_sums() %>%
+  data.frame()
+
+colnames(scaled_TotalSeqs_df)[1] <- "TotalSeqs"
+
+# add a new column of num_ASVs (RAW, non-noramlized # ASVs)
+scaled_TotalSeqsASVs_df <- 
+  scaled_TotalSeqs_df %>%
+  mutate(num_ASVs = colSums(otu_table(scaled_physeq) > 1))
+
+# Plot it! 
+scaledSeq_histogram <- 
+  scaled_TotalSeqs_df %>%
+  ggplot(aes(x = TotalSeqs)) + 
+  geom_histogram(bins = 50) + 
+  labs(title = "Scaled Seq Depth Histogram") + 
+  #scale_x_continuous(limits = c(0, 7500)) + 
+  theme_bw()
+
+# Scaling always gives us a range! 
+# Minimum sequences
+min(scaled_TotalSeqs_df$TotalSeqs) 
+# Total Range 
+range(scaled_TotalSeqs_df)
+# How many is that range? 
+range_seqs <- (max(scaled_TotalSeqs_df$TotalSeqs) - min(scaled_TotalSeqs_df$TotalSeqs))
+range_seqs
+# And in terms of percent? 
+range_seqs/max(scaled_TotalSeqs_df$TotalSeqs)
+#View(scaled_TotalSeqs_df)
+
+# Set the axis min and max for the next plot 
+max_y <- max(scaled_TotalSeqs_df$TotalSeqs) + 10
+min_y <- min(scaled_TotalSeqs_df$TotalSeqs) - 10
+
+# Now, draw the plot 
+scaledSeq_vs_numASV_plot <- 
+  scaled_TotalSeqsASVs_df %>%
+  ggplot(aes(x = num_ASVs, y = TotalSeqs)) + 
+  geom_point() + 
+  scale_y_continuous(limits = c(min_y, max_y)) +
+  #geom_smooth(method = "lm") + 
+  theme_bw() + 
+  labs(title = "Scaled: Seq Depth vs # ASVs")
+
+# Put the two plots together.
+scaledSeq_histogram + scaledSeq_vs_numASV_plot +
+  plot_annotation(tag_levels = "A")
+```
+
+Interpretation 3: Yes! The total number of sequences across all my samples are within the same range. The minimum read count is 32,002 reads which good because that is what we scaled to, and the maximum is 32,005 reads. There is only a three sequence difference in the minimum and maximum with scaling so I would say that it looks pretty good! The number of ASVs per sample did not change, because it is just rescaling read counts, not removing any sequences.
+
+# Beta Diversity: Dissimilarity Metrics in Microbial Ecology
+
+## Five Types of Dissimilarities
+
+### A. Jaccard Dissimilarity
+
+### B. Sorensen-Dice Dissimilarity
+
+### C. Bray-Curtis Dissimilarity
+
+### D. Unweighted UniFrac Dissimilarity
+
+### E. Weighted UniFrac Dissimilarity
+
+# 4. Calculating dissimilarity
+
+```{r calc-dissimilarity}
+# Sorensen Dissimiliarty
+scaled_sorensen_dist <- phyloseq::distance(scaled_physeq, method = "bray", binary = TRUE)
+
+# What does it look like? 
+class(scaled_sorensen_dist)
+str(scaled_sorensen_dist)
+#head(as.matrix(scaled_sorensen_dist))
+
+# Bray-Curtis Dissimiliarty
+scaled_bray_dist <- phyloseq::distance(scaled_physeq, method = "bray", binary = FALSE)
+
+# Abundance-Unweighted UniFrac
+scaled_uUnifrac_dist <- phyloseq::distance(scaled_physeq, method = "unifrac")
+
+# Abundance-Weighted UniFrac
+scaled_wUnifrac_dist <- phyloseq::distance(scaled_physeq, method = "wunifrac")
+```
+
+Interpretation 4: The scientific question from my project is if cheese type affects the microbial diversity. To answer this question, we can use the Sorensen to detect differences in the presence/absence of bacteria in different cheese types focusing on the shared taxa. From there, we can look at Bray Curtis because sensitive to both composition and abundance, which is important for cheese where certain taxa dominate the matrix. Lastly, an weighted UniFrac could be an interesting layer by considering how evolutionarily different microbial communities are between different cheeses. Maybe this is too much fo a strech for this metric, but I think it can help reveal microbial differences that relate to visible and functional differences in cheese, like holes, aging characteristics, or flavor profiles based on phylogeny. 
+
+# 5a. PERMANOVA: Testing Means/Centroids
+
+Since I am working with categorical data only, and most of the metadata is the same, then I am just going to see the effect that cheese has in the Sorensen and Bray Curtis model. I don't have enough information for anything else to have that be a factor to consider in analysis or composition. 
+
+### Sorensen
+
+```{r PERMANOVA-categorical-sorensen}
+# Sorensen
+## 1. Run with by = terms for R² values, sensitive to order of variables! 
+sorensen_cheese_adonis_terms1 <- adonis2(scaled_sorensen_dist ~ cheese_type * cheese_id, data = metadata_df, by = "terms")
+sorensen_cheese_adonis_terms1
+
+#change interaction order 
+sorensen_cheese_adonis_terms2 <- adonis2(scaled_sorensen_dist ~ cheese_id * cheese_type, data = metadata_df, by = "terms")
+sorensen_cheese_adonis_terms2
+
+## 2. Run with by = "margin" for marginal p-values, which we can compare to the residuals from the first one. 
+sorensen_cheese_adonis_margin <- adonis2(scaled_sorensen_dist ~ cheese_type * cheese_id, data = metadata_df, by = "margin")
+sorensen_cheese_adonis_margin
+```
+
+Now let's do the Bray Curtis with categorical data. 
+
+### Bray-Curtis
+
+```{r PERMANOVA-categorical-bray}
+# Bray-Curtis
+bray_cheese_adonis_terms1 <- adonis2(scaled_bray_dist ~ cheese_type * cheese_id, data = metadata_df, by = "terms")
+bray_cheese_adonis_terms1
+
+# change term order
+bray_cheese_adonis_terms2 <- adonis2(scaled_bray_dist ~ cheese_type * cheese_id, data = metadata_df, by = "terms")
+bray_cheese_adonis_terms2
+
+
+## 2. Run with by = "margin" for marginal p-values
+bray_cheese_adonis_margin <- adonis2(scaled_bray_dist ~ cheese_type * cheese_id, data = metadata_df, by = "margin")
+bray_cheese_adonis_margin
+```
+
+Interpretation 5: For my PERMANOVA analysis I chose to look at the interaction of `cheese_type` and `cheese_id`. I chose these two because the `chese_id` is the tag I used to assign `cheese_type` so in essence, it is the same variable. 
+
+Looking at the Sorensen result, interaction term order had no impact on the significance. Cheese type and cheese ID accounts for almost 82% of the explained differences in the taxa. That is huge! Likewise term or marginal produced the same end result. Independently, cheese_id has less of an effect than cheese type but they mean the same thing in this context. The interaction of the two together was not significant, which would make sense in this context since it is basically the same data just expressed in two different ways. 
+
+Moving on to Bray Curtis,the results were very similar to the Sorensen above. The interaction of the two together was not significant, which would make sense in this context since it is basically the same data just expressed in two different ways. Likewise, the term order had no real impact on the result. The cheese type was much more significant than the cheese id, but again mean the same thing and together account for about 62% of the differences we see in taxa. 
+
+Overall, from here we can reject the null hypothesis and conclude that the microbial diversity is related to the cheese type. 
+
+# 5b. Betadisper: Testing Variances/Dispersions
+
+## Sorensen
+
+```{r betadisper-sorensen}
+# Homogeneity of Disperson test with beta dispr
+# Sorensen Betadisper - cheese type 
+dispr_sorensen_cheese_type <- betadisper(scaled_sorensen_dist, metadata_df$cheese_type)
+# permutest() performs a non-parametric permutation test, which is robust and valid for the kind of data used in beta diversity analysis (e.g., dissimilarity matrices).
+permutest(dispr_sorensen_cheese_type)
+
+# Sorensen Betadisper - cheese id  
+dispr_sorensen_cheese_id <- betadisper(scaled_sorensen_dist, metadata_df$cheese_id)
+permutest(dispr_sorensen_cheese_id)
+
+```
+
+## Bray-Curtis
+
+```{r betadisper-bray}
+# Bray-Curtis Betadisper - cheese type 
+dispr_bray_cheese_type <- betadisper(scaled_bray_dist, metadata_df$cheese_type)
+permutest(dispr_bray_cheese_type)
+
+# Bray-Curtis Betadisper - cheese id  
+dispr_bray_cheese_id <- betadisper(scaled_bray_dist, metadata_df$cheese_id)
+permutest(dispr_bray_cheese_id)
+
+```
+
+Interpretation 6:Regardless of Sorensen and Bray Curtis, there is no significant difference in beta-dispersion (community variability) among cheese types. Even though cheese types may differ in composition, the amount of microbial variation within each cheese type is roughly the same. No cheese type had samples that were consistently more similar (tight clustering) or more variable (scattered) than others.
+
+Interpretation 7: Cheese type has a significant effect on the microbial community composition, explaining nearly half of the variation in the data. However, the variation within each cheese type group is similar, meaning differences detected by PERMANOVA are not just due to one group being more variable.
+
+Cheese type significantly influences the composition of the microbial communities found in cheese samples. This difference is not due to uneven variation within cheese groups (since dispersions are homogenous), but rather reflects meaningful shifts in microbial structure between cheese types. Therefore, cheese type plays a strong and consistent role in shaping the microbial landscape of the samples.
+
+# 6. Visualize Community Dissimilarity with Ordination
+
+# 6a. PCoA: Principal Coordinates Analysis
+
+```{r pcoa-plots, fig.height=3.5, fig.width=7}
+
+# back it up...so i ran this and had so many problems and that is when it hit me--my cheese_type is NOT in my physeq object! so lets add that and see if it fixes some of my problems
+
+head(sample_data(scaled_physeq)) # nope no cheese_type...time to add!
+
+# Step 1: Extract metadata as data.frame
+sample_meta <- as(sample_data(scaled_physeq), "data.frame")
+
+# Step 2: Create a named vector of cheese types
+cheese_type_vec <- c(
+  Q4 = "Colonial", Q5 = "Colonial", Q6 = "Colonial", Q7 = "Colonial", Q8 = "Colonial",
+  Q1 = "Feta-type", Q10 = "Feta-type", Q2 = "Feta-type", Q3 = "Feta-type", Q9 = "Feta-type",
+  Q11 = "Fresh", Q12 = "Fresh", Q13 = "Fresh", Q14 = "Fresh", Q15 = "Fresh",
+  Q16 = "Pecorino-type", Q17 = "Pecorino-type", Q18 = "Pecorino-type", Q19 = "Pecorino-type", Q20 = "Pecorino-type"
+)
+
+# Step 3: Assign cheese_type to sample_meta using rownames
+sample_meta$cheese_type <- cheese_type_vec[rownames(sample_meta)]
+
+# Step 4: Reassign to the phyloseq object
+sample_data(scaled_physeq)$cheese_type <- sample_meta$cheese_type
+
+# check 
+table(sample_data(scaled_physeq)$cheese_type, useNA = "always")
+
+head(rownames(sample_meta))
+names(cheese_type_vec)
+
+# Manually create a lookup table
+cheese_lookup <- data.frame(
+  srr_id = c("SRR9722160", "SRR9722161", "SRR9722162", "SRR9722163", "SRR9722164",
+             "SRR9722165", "SRR9722166", "SRR9722167", "SRR9722168", "SRR9722169",
+             "SRR9722170", "SRR9722171", "SRR9722172", "SRR9722173", "SRR9722174",
+             "SRR9722175", "SRR9722176", "SRR9722177", "SRR9722178", "SRR9722179"),
+  sample_name = c("Q11", "Q12", "Q13", "Q14", "Q1",
+                  "Q2", "Q17", "Q18", "Q19", "Q20",
+                  "Q6", "Q9", "Q10", "Q3", "Q7",
+                  "Q5", "Q8", "Q16", "Q15", "Q4")
+)
+
+# Add cheese type based on sample name
+cheese_lookup$cheese_type <- case_when(
+  cheese_lookup$sample_name %in% c("Q4", "Q5", "Q6", "Q7", "Q8") ~ "Colonial",
+  cheese_lookup$sample_name %in% c("Q1", "Q10", "Q2", "Q3", "Q9") ~ "Feta-type",
+  cheese_lookup$sample_name %in% c("Q15", "Q14", "Q13", "Q12", "Q11") ~ "Fresh",
+  cheese_lookup$sample_name %in% c("Q16", "Q17", "Q18", "Q19", "Q20") ~ "Pecorino-type",
+  TRUE ~ NA_character_
+)
+
+# Convert sample_data to data frame
+sample_meta <- as(sample_data(scaled_physeq), "data.frame") %>%
+  rownames_to_column(var = "srr_id") %>%
+  left_join(cheese_lookup, by = "srr_id") %>%
+  column_to_rownames(var = "srr_id")
+
+# Reassign to phyloseq
+sample_data(scaled_physeq) <- sample_data(sample_meta)
+
+table(sample_data(scaled_physeq)$cheese_type, useNA = "always")
+
+
+### SORENSEN 
+# First, calculate PCoA with Soresen
+scaled_soren_pcoa <- 
+  ordinate(physeq = scaled_physeq,
+         method = "PCoA",
+         distance = "bray", binary = TRUE)
+
+# Take a quick look
+str(scaled_soren_pcoa)
+
+# Plot it: Sorensen PCoA  
+sorensen_pcoa_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                  ordination = scaled_soren_pcoa,
+                  color = "cheese_type",
+                  title = "Sorensen PCoA") + 
+  scale_color_manual(values = cheese_colors) + 
+  scale_shape_manual(values = c(15, 16, 17)) + 
+  geom_point(size = 5, alpha = 0.5) + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+
+### Bray-Curtis 
+# Second, calculate PCoA with Bray-Curtis
+scaled_bray_pcoa <- 
+  ordinate(physeq = scaled_physeq,
+         method = "PCoA",
+         distance = "bray", binary = FALSE)
+
+# Plot it: Bray-Curtis PCoA 
+bray_pcoa_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                  ordination = scaled_bray_pcoa,
+                  color = "cheese_type",
+                  title = "Bray-Curtis PCoA") + 
+  scale_color_manual(values = cheese_colors) + 
+  scale_shape_manual(values = c(15, 16, 17)) + 
+  geom_point(size = 5, alpha = 0.5) + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+# Show the plots 
+sorensen_pcoa_plot + bray_pcoa_plot +
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+
+```
+
+Interpretation 8: Principal Coordinates Analysis (PCoA) based on both Sorensen and Bray-Curtis distances revealed clustering of cheese samples by cheese type, with clearer separation when abundance (Bray-Curtis) was considered. This suggests that while different cheese types may share common taxa, their relative abundances differ substantially, contributing to distinct microbial profiles.
+
+## 6b. NMDS: Non-Metric Multidimensional Scaling 
+
+```{r soren-nmds}
+
+#hmm there is another error in this...let's see what we can trouble shoot
+head(sample_data(scaled_physeq))
+str(sample_data(scaled_physeq)) #silly me all this work to notice a typo
+
+## SORENSEN 
+scaled_soren_nmds <- 
+  ordinate(physeq = scaled_physeq,
+         method = "NMDS",
+         distance = "bray", binary = TRUE)
+
+# Plot it! 
+sorensen_nmds_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                ordination = scaled_soren_nmds,
+                color = "cheese_type",
+                title = "Sorensen NMDS") + 
+  scale_color_manual(values = cheese_colors) + 
+  geom_point(size = 5, alpha = 0.5) + 
+  labs(subtitle = "Stress = 0.153") + 
+  theme_bw() + 
+  theme(legend.position = "right")
+
+### Bray-Curtis 
+# Second, calculate NMDS with Bray-Curtis
+scaled_bray_nmds <- 
+  ordinate(physeq = scaled_physeq,
+         method = "NMDS",
+         distance = "bray", binary = FALSE)
+
+# Plot it: Bray-Curtis NMDS 
+bray_nmds_plot <- 
+  plot_ordination(physeq = scaled_physeq,
+                ordination = scaled_bray_nmds,
+                color = "cheese_type",
+                title = "Bray-Curtis NMDS") + 
+  scale_color_manual(values = cheese_colors) + 
+  geom_point(size = 5, alpha = 0.5) + 
+  labs(subtitle = "Stress = 0.143")+
+  theme_bw() + 
+  theme(legend.position = "right")
+
+# Show the plots 
+sorensen_nmds_plot + bray_nmds_plot + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+Interpretation 9: NMDS ordination of cheese microbiomes revealed distinct community profiles across cheese types. Clustering by cheese type was more pronounced in Bray-Curtis NMDS (based on ASV abundance) than in Sorensen NMDS (based on presence/absence), indicating that differences in microbial abundance are key drivers of community structure among the cheese varieties. The low stress values for both ordinations (<0.2) suggest a good representation of the underlying multidimensional data.
+
+## All ordinations together!
+
+```{r ordinations, fig.width=7, fig.height=6}
+sorensen_pcoa_plot + bray_pcoa_plot + 
+sorensen_nmds_plot + bray_nmds_plot + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A")
+```
+
+Interpretation 10: PCoA with Bray-Curtis (Panel B) is likely the most informative visualization for the cheese data. It shows the clearest separation between cheese types, is easier to interpret thanks to variance-explained percentages, and reflects abundance differences well — which are key in differentiating these microbiomes.
+
+# Final info for Reproducibility 
+
+## Check Render Time
+```{r stop-time}
+# Take the time now that we are at the end of the script
+end_time <- Sys.time()
+end_time 
+
+# Echo the elapsed time
+elapsed_time <- round((end_time - start_time), 3)
+elapsed_time
+```
+
+## Session Information
+
+```{r session-info}
+# Ensure reproducibility with package version information
+devtools::session_info()
+```
+
+
+
