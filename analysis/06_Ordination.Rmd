@@ -75,6 +75,12 @@ pacman::p_load(tidyverse, devtools, phyloseq, patchwork, vegan,
 # Load Colors 
 source("code/colors.R")
 
+cheese_colors <- c(
+  "Colonial" = "lightpink1",
+  "Feta-type" = "hotpink",
+  "Fresh" = "deeppink3",
+  "Pecorino-type" = "deeppink4")
+
 # Load functions 
 source("code/functions.R")
 ```
@@ -362,31 +368,6 @@ Cheese type significantly influences the composition of the microbial communitie
 ```{r pcoa-plots, fig.height=3.5, fig.width=7}
 
 # back it up...so i ran this and had so many problems and that is when it hit me--my cheese_type is NOT in my physeq object! so lets add that and see if it fixes some of my problems
-
-head(sample_data(scaled_physeq)) # nope no cheese_type...time to add!
-
-# Step 1: Extract metadata as data.frame
-sample_meta <- as(sample_data(scaled_physeq), "data.frame")
-
-# Step 2: Create a named vector of cheese types
-cheese_type_vec <- c(
-  Q4 = "Colonial", Q5 = "Colonial", Q6 = "Colonial", Q7 = "Colonial", Q8 = "Colonial",
-  Q1 = "Feta-type", Q10 = "Feta-type", Q2 = "Feta-type", Q3 = "Feta-type", Q9 = "Feta-type",
-  Q11 = "Fresh", Q12 = "Fresh", Q13 = "Fresh", Q14 = "Fresh", Q15 = "Fresh",
-  Q16 = "Pecorino-type", Q17 = "Pecorino-type", Q18 = "Pecorino-type", Q19 = "Pecorino-type", Q20 = "Pecorino-type"
-)
-
-# Step 3: Assign cheese_type to sample_meta using rownames
-sample_meta$cheese_type <- cheese_type_vec[rownames(sample_meta)]
-
-# Step 4: Reassign to the phyloseq object
-sample_data(scaled_physeq)$cheese_type <- sample_meta$cheese_type
-
-# check 
-table(sample_data(scaled_physeq)$cheese_type, useNA = "always")
-
-head(rownames(sample_meta))
-names(cheese_type_vec)
 
 # Manually create a lookup table
 cheese_lookup <- data.frame(
