@@ -1,0 +1,483 @@
+---
+title: "Microbial Composition Analysis Across Cheese Types"
+author: "Chloe J McGovern"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.path = "figures/07_Composition")
+```
+
+# Setup 
+
+## Load Packages 
+```{r load-packages}
+# Load in the packages 
+pacman::p_load(tidyverse, devtools, DT, phyloseq, patchwork, FSA,
+               install = FALSE)
+
+#install.packages("FSA")
+
+# load colors
+source("code/colors.R")
+```
+
+# Goals
+
+In this file, we will perform compositional analysis of our scaled/noramlized/rarefied microbial dataset! 
+
+1. Load in scaled/normalized phyloseq object. 
+2. Calculate the relative abundances of taxonomic groups at various levels: 
+    A. Phylum
+    B. Genus
+    C. ASV 
+3. Plot them, and narrow in on specific taxnomic group of interest
+
+## Inputs 
+
+1. We will need the `scaled_physeq.RData`, which includes a rooted tree that we created in `analysis/06_Ordination/scaled_physeq.RData`. 
+
+## Outputs 
+
+1. Beautiful visualizations of microbial taxa and how they vary across parameters related to our study: station (categorical) and salinity (continuous).
+2. Run some stats! 
+
+# Compositional Data 
+
+Microbial abundance data—like 16S rRNA gene or metagenomics data—are typically **compositional:** they represent relative abundances constrained to a constant total (*e.g.,* percent or proportions). This introduces spurious correlations and other issues if analyzed with traditional statistics. This is a very important limitation to microbial data! 
+
+Interpretation 1: Microbial abundance was assessed using relative data, which reflects the proportion of each taxon within a sample rather than absolute counts. Changes in one taxon’s relative abundance may artificially suggest shifts in others due to the fixed total constraint. This limits interpretation of true microbial load and community dynamics. 
+
+## 1. Load in Scaled Phyloseq object 
+
+
+```{r load-data}
+load("data/06_Ordination/scaled_physeq.RData")
+
+# Look at the data 
+scaled_physeq
+
+# Intuition check - scaled at 1,942
+min(sample_sums(scaled_physeq))
+range(sample_sums(scaled_physeq))
+```
+
+
+# Taxonomic Analysis! 
+
+In this analysis, we will drill down from phylum to ASV level analyses, which will enable increasingly detailed insights into microbial diversity and potential ecological roles. However, it is also important for us to remember that deeper levels also come with increased noise and data sparsity, especially for rare groups. 
+
+## A. Phylum 
+
+```{r calc-phylum-df}
+# Create a phylum level dataframe
+phylum_df <- 
+  scaled_physeq %>%
+  # Agglomerate all ASV counts within a phylum
+  tax_glom(taxrank = "Phylum") %>%
+  # Calculate the relative abundance! 
+  transform_sample_counts(function(x) {x/sum(x)}) %>%
+  # Create a dataframe from phyloseq object
+  psmelt() 
+  # Filter out Phyla < 1 % 
+  #dplyr::filter(Abundance > 0.01)
+
+## What are the phylum abundances? 
+phylum_df %>%
+  group_by(Phylum) %>%
+  summarize(mean_PercAbund = round(mean(Abundance), digits = 4)) %>%
+  arrange(-mean_PercAbund) %>%
+  datatable()
+
+# Make a list of phyla the top phyla 
+top10_phyla <- 
+  phylum_df %>%
+  group_by(Phylum) %>%
+  summarize(mean_PercAbund = mean(Abundance)) %>%
+  arrange(-mean_PercAbund) %>%
+  head(n = 10) %>%
+  pull(Phylum)
+
+top10_phyla
+```
+
+Interpretation 2: Bacillota and Pseomonadota are the predominant phyla with 0.97% and 0.3% relative abundance, respectively. 
+
+Bacteroidota, Chloroflexota, and Actinomycetota are in such small amounts (0, 0, and 0.0001 is what R rounds them too) so I think for continual analysis I will only focus on the Bacillota and Pseudomonadota phyla. 
+
+## Stacked Bar Plots 
+
+```{r phylum-stacked-bar, fig.width=9, fig.height=3.5}
+# Stacked Bar Plot With All phyla 
+# Plot Phylum Abundances - make sure to load phylum_colors 
+
+## need to add cheese_type column first
+
+colnames(phylum_df)
+
+phylum_df <-
+  phylum_df %>%
+    mutate(cheese_type = case_when(
+    Sample.Name %in% c("Q4", "Q5", "Q6", "Q7", "Q8") ~ "Colonial",
+    Sample.Name %in% c("Q1", "Q2", "Q3", "Q9", "Q10") ~ "Feta-type",
+    Sample.Name %in% c("Q15", "Q14", "Q13", "Q12", "Q11") ~ "Fresh",
+    Sample.Name %in% c("Q16", "Q17", "Q18", "Q19", "Q20") ~ "Pecorino-type"
+  ))
+
+#View(phylum_df)
+
+
+phylum_df %>%
+  filter(Phylum %in% top10_phyla) %>%
+  ggplot(aes(x = Sample.Name, y = Abundance, fill = Phylum)) +
+  facet_grid(. ~ cheese_type, scales = "free_x", space = "free_x") +  # Group by cheese type
+  geom_bar(stat = "identity", color = "black") +
+  scale_fill_manual(values = phylum_colors) +
+  labs(title = "Top 10 Phyla by Sample, Grouped by Cheese Type") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    strip.text = element_text(face = "bold"),
+    panel.spacing.x = unit(1, "lines")
+  )
+
+```
+
+## Faceted Bar plot 
+
+To help compare the phylum abundance between sample types, we can facet by phylum to better see how the changes occur across the stations, which is masked in the stacked bar plot. It's a little better than the stacked bar plot, however, we can do even better! 
+
+```{r phylum-facet-bar, fig.width=5, fig.height=12}
+phylum_df %>%
+  dplyr::filter(Phylum %in% top10_phyla) %>%
+  ggplot(aes(x = Sample.Name, y = Abundance, fill = Phylum)) + 
+  facet_grid(Phylum~cheese_type, scale = "free") + 
+  # add the stacked bar 
+  geom_bar(stat = "identity", color = "black") + 
+  # change the colors to be our selected colors 
+  scale_fill_manual(values = phylum_colors) + 
+  theme_bw() + 
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+
+### Or combined together: 
+phylum_df %>%
+  dplyr::filter(Phylum %in% top10_phyla) %>%
+  ggplot(aes(x = Sample.Name, y = Abundance, fill = Phylum, color = Phylum)) + 
+  facet_grid(Phylum~cheese_type, scale = "free") + 
+  # add the stacked bar 
+  geom_jitter() +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5) + 
+  # change the colors to be our selected colors 
+  scale_fill_manual(values = phylum_colors) + 
+  scale_color_manual(values = phylum_colors) + 
+  theme_bw() + 
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+```
+
+```{r plot-phylum-cheese, fig.width=12, fig.height=6}
+### Or combined together: 
+phylum_df %>%
+  dplyr::filter(Phylum %in% top10_phyla) %>%
+  ggplot(aes(x = cheese_type, y = Abundance, fill = Phylum, color = Phylum)) + 
+  facet_wrap(Phylum~., scales = "free", nrow = 2) + 
+  # add the stacked bar 
+  geom_jitter() +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5) + 
+  # change the colors to be our selected colors 
+  scale_fill_manual(values = phylum_colors) + 
+  scale_color_manual(values = phylum_colors) + 
+  theme_bw() + 
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
+
+# just important two phyla
+
+phylum_df %>%
+  dplyr::filter(Phylum %in% c("Bacillota", "Pseudomonadota")) %>%
+  ggplot(aes(x = cheese_type, y = Abundance, fill = Phylum, color = Phylum)) + 
+  facet_wrap(Phylum ~ ., scales = "free", nrow = 2) + 
+  geom_jitter() +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5) + 
+  scale_fill_manual(values = phylum_colors) + 
+  scale_color_manual(values = phylum_colors) + 
+  theme_bw() + 
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1)
+  )
+
+```
+
+Interpretation 3: Microbial composition across cheese types is consistently dominated by Bacillota, indicating its foundational role in cheese microbial communities. However, the increased relative abundance of Pseudomonadota in Feta-type cheeses suggests that cheese style may influence the presence or enrichment of certain microbial groups. This pattern supports the hypothesis that cheese processing conditions — such as moisture, salting, or aging — shape microbial community structure, even at the phylum level.
+
+### A1. Bacillota
+
+```{r phylum-bacillota, fig.width=7, fig.height=3.5}
+# Narrow in on a specific group
+# Bacillota - y: abundance, x: cheese_type, dot plot + boxplot
+bacillota_phylum_cheese <- 
+  phylum_df %>%
+  dplyr::filter(Phylum == "Bacillota") %>%
+  # build the plot 
+  ggplot(aes(x = cheese_type, y = Abundance, 
+             fill = cheese_type, color = cheese_type)) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + # outliers not plotted here in boxplot 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Bacillota Phylum") + 
+  scale_color_manual(values = cheese_colors) + 
+  scale_fill_manual(values = cheese_colors) + 
+    theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+          legend.position = "right")
+
+bacillota_phylum_cheese
+
+kruskal.test(Abundance ~ cheese_type, data = filter(phylum_df, Phylum == "Bacillota")) # no significant difference
+
+dunnTest(Abundance ~ cheese_type, 
+         data = filter(phylum_df, Phylum == "Bacillota"), 
+         method = "bh") #no secret pairwise comparisons
+
+```
+
+### A2. Pseudomonadota
+
+```{r phylum-pseudo, fig.width=7, fig.height=3.5}
+# Narrow in on a specific group
+# Bacillota - y: abundance, x: cheese_type, dot plot + boxplot
+pseudo_phylum_cheese <- 
+  phylum_df %>%
+  dplyr::filter(Phylum == "Pseudomonadota") %>%
+  # build the plot 
+  ggplot(aes(x = cheese_type, y = Abundance, 
+             fill = cheese_type, color = cheese_type)) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + # outliers not plotted here in boxplot 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Pseudomonadota Phylum") + 
+  scale_color_manual(values = cheese_colors) + 
+  scale_fill_manual(values = cheese_colors) + 
+    theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+          legend.position = "right")
+
+pseudo_phylum_cheese
+
+kruskal.test(Abundance ~ cheese_type, data = filter(phylum_df, Phylum == "Pseudomonadota")) # p = 0.05!! maybe there is a pairwise!
+
+dunnTest(Abundance ~ cheese_type, 
+         data = filter(phylum_df, Phylum == "Pseudomonadota"), 
+         method = "bh") # Colonial - Fresh p = 0.04!
+```
+
+Interpretation 4: Unfortunately, due to the lesser complexity of cheese microbial communities, I am stuck with these two phyla to dig into--I hope at the genus level there are some interesting community shifts! I am shocked that the spread of the feta-type analysis didn't result in any significant differences. 
+
+## B. Genus
+
+Let's first calculate the genus data frame. 
+
+```{r genus-actino-plots, fig.width=12, fig.height=4}
+# Calculate the Family relative abundance 
+# Note: The read depth MUST be normalized in some way: scale_reads
+genus_df <- 
+  scaled_physeq %>%
+  # agglomerate at the phylum level 
+  tax_glom(taxrank = "Genus") %>% 
+  # Transform counts to relative abundance 
+  transform_sample_counts(function (x) {x/sum(x)}) %>%
+  # Melt to a long format 
+  psmelt() 
+
+genus_df
+
+# add cheese_type
+Genus_DF <-
+  genus_df %>%
+  mutate(cheese_type = case_when(
+    Sample.Name %in% c("Q4", "Q5", "Q6", "Q7", "Q8") ~ "Colonial",
+    Sample.Name %in% c("Q1", "Q2", "Q3", "Q9", "Q10") ~ "Feta-type",
+    Sample.Name %in% c("Q15", "Q14", "Q13", "Q12", "Q11") ~ "Fresh",
+    Sample.Name %in% c("Q16", "Q17", "Q18", "Q19", "Q20") ~ "Pecorino-type"
+  ))
+
+#View(Genus_DF)
+
+top_genera <- Genus_DF %>%
+  group_by(Genus) %>%
+  summarise(TotalAbundance = sum(Abundance, na.rm = TRUE)) %>%
+  arrange(desc(TotalAbundance)) 
+
+top_genus_names <- top_genera$Genus
+
+top_genus_names
+
+```
+
+### B1. Bacillota Genera
+
+```{r bacillota-genus, fig.width=6, fig.height=6}
+# Bacillota
+# Plot genus 
+bacillota_genus_cheese <- 
+  Genus_DF %>%
+  dplyr::filter(Phylum == "Bacillota") %>%
+  # At first, plot all of the genera and then subset the ones that have intersting trends
+  dplyr::filter(Genus %in% c("Streptococcus", "Lactobacillus", "Lactococcus", "Lacticaseibacillus", "Staphylococcus")) %>%
+  # build the plot 
+  ggplot(aes(x = cheese_type, y = Abundance, 
+             fill = cheese_type, color = cheese_type)) + 
+  facet_wrap(.~Genus, scales = "free_y", nrow = 1) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + # outliers not plotted here in boxplot 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Bacillota Genera") + 
+  scale_color_manual(values = cheese_colors) + 
+  scale_fill_manual(values = cheese_colors) + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+
+bacillota_genus_cheese
+```
+
+### B2. Pseudomonadota Genera
+
+```{r pesudo-genus, fig.width=6, fig.height=6}
+
+# Plot genus 
+pseudo_genus_cheese <- 
+  Genus_DF %>%
+  dplyr::filter(Phylum == "Pseudomonadota") %>%
+  # At first, plot all of the genera and then subset the ones that have intersting trends
+  dplyr::filter(Genus %in% c("Klebsiella", "Phyllobacterium", "Raoultella", "Yersinia", "Pseudomonas")) %>%
+  # build the plot 
+  ggplot(aes(x = cheese_type, y = Abundance, 
+             fill = cheese_type, color = cheese_type)) + 
+  facet_wrap(.~Genus, scales = "free_y", nrow = 1) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + # outliers not plotted here in boxplot 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Pseudomonadota Genera") + 
+  scale_color_manual(values = cheese_colors) + 
+  scale_fill_manual(values = cheese_colors) + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+
+pseudo_genus_cheese
+
+```
+
+Interpretation 5: To explore mid-level taxonomic trends, I generated genus-level plots for dominant phyla identified in the initial analysis. This revealed meaningful differences masked at the phylum level. For example, while Bacillota appeared consistently dominant across cheese types, this pattern was largely driven by a single genus, Streptococcus, with other genera such as Lactobacillus and Lacticaseibacillus showing more variable, cheese-type-specific distributions. Similarly, while Pseudomonadota appeared low in overall abundance, genus-level plots revealed sporadic spikes in Yersinia, Klebsiella, and Pseudomonas in select samples. Given that a small number of dominant genera accounted for the majority of abundance, plotting intermediate ranks like family or order did not add interpretive value beyond the genus level.
+
+## C. ASV level
+
+```{r ASV-plots, fig.width=12, fig.height=4}
+# Calculate the Family relative abundance 
+# Note: The read depth MUST be normalized in some way: scale_reads
+ASV_df <- 
+  scaled_physeq %>%
+  # Prune out ASVs that have fewer than 100 counts! 
+  ## LOOK AT HOW MANY ARE REMOVED! We scaled to 1,962 reads! 
+  prune_taxa(taxa_sums(.) >= 196, .) %>%
+  # agglomerate at the phylum level 
+  tax_glom(taxrank = "ASV") %>% 
+  # Transform counts to relative abundance 
+  transform_sample_counts(function (x) {x/sum(x)}) %>%
+  # Melt to a long format 
+  psmelt() %>%
+  # add cheese_type
+  mutate(cheese_type = case_when(
+    Sample.Name %in% c("Q4", "Q5", "Q6", "Q7", "Q8") ~ "Colonial",
+    Sample.Name %in% c("Q1", "Q2", "Q3", "Q9", "Q10") ~ "Feta-type",
+    Sample.Name %in% c("Q15", "Q14", "Q13", "Q12", "Q11") ~ "Fresh",
+    Sample.Name %in% c("Q16", "Q17", "Q18", "Q19", "Q20") ~ "Pecorino-type"
+  ))
+```
+
+### C1. Bacillota ASVs 
+
+```{r bacillota-asvs, fig.width=6, fig.height=8}
+# Calculate top couple of ASVs 
+# Make a list of phyla the top phyla 
+top_bacillota_ASVs <- 
+  ASV_df %>%
+  dplyr::filter(Phylum == "Bacillota") %>%
+  group_by(ASV) %>%
+  summarize(mean_Abundance = mean(Abundance)) %>%
+  dplyr::filter(mean_Abundance > 0.005) %>%
+  pull(ASV)
+
+# Plot ASVs 
+bacillota_asv_cheese <- 
+  ASV_df %>%
+  dplyr::filter(ASV %in% top_bacillota_ASVs) %>%
+  # build the plot 
+  ggplot(aes(x = cheese_type, y = Abundance, 
+             fill = cheese_type, color = cheese_type)) + 
+  facet_wrap(Genus~ASV, scales = "free_y", nrow = 2) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + # outliers not plotted here in boxplot 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Bacillota ASVs > 0.5%") + 
+  scale_color_manual(values = cheese_colors) + 
+  scale_fill_manual(values = cheese_colors) + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+bacillota_asv_cheese
+```
+
+### C2. Pseudomonadota ASVs
+
+```{r pseudo-asvs, fig.width=10, fig.height=8}
+# Calculate top couple of ASVs 
+# Make a list of phyla the top phyla 
+top_pseudo_ASVs <- 
+  ASV_df %>%
+  dplyr::filter(Phylum == "Pseudomonadota") %>%
+  group_by(ASV) %>%
+  summarize(mean_Abundance = mean(Abundance)) %>%
+  dplyr::filter(mean_Abundance > 0.005) %>%
+  pull(ASV)
+
+# Plot ASVs: Station 
+pseudo_asv_cheese <- 
+  ASV_df %>%
+  # Subset for more abundant ASVs
+  dplyr::filter(ASV %in% top_pseudo_ASVs) %>%
+  # build the plot 
+  ggplot(aes(x = cheese_type, y = Abundance, 
+             fill = cheese_type, color = cheese_type)) + 
+  facet_wrap(Genus~ASV, scales = "free_y", nrow = 2) + 
+  geom_boxplot(alpha = 0.5, outlier.shape = NA) + # outliers not plotted here in boxplot 
+  geom_jitter() + 
+  theme_bw() + 
+  labs(title = "Pseudomonadota ASVs > 0.5%") + 
+  scale_color_manual(values = cheese_colors) + 
+  scale_fill_manual(values = cheese_colors) + 
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        legend.position = "none")
+
+pseudo_asv_cheese
+```
+
+Interpretation 6: I decided to drop my percent relative abundance down to 0.1% insteas of 0.5% to give me some more of a better picture since there weren't many ASVs above that threshold--specifically for the Pseudomonadota. In the Bacillota phyla, Lacticaseibacillus, Lactobacillus, Lactococcus, Staphylococcus, and Streptococcus were the top genera. For the Pseudomonadota phyla, at the 0.5% threshold, only Yersinia genera met the criteria. When I made the threshold 0.1%, Klebsiella, Raoutella, and Phyllobacterium were the dominant ASVs. 
+
+Interpretation 7: Several ASVs within the Bacillota phylum—particularly Streptococcus ASV_0001, Lactobacillus ASV_0002, and Staphylococcus ASV_0005—show clear and consistent differences across cheese types. For example, Streptococcus ASV_0001 dominated in Fresh and Pecorino-type cheeses but was more variable in Colonial and Feta-type cheeses. Meanwhile, Pseudomonadota ASVs, such as Yersinia ASV_0004, were sporadically abundant in specific samples, with no consistent pattern by cheese type. This indicates that some ASVs have niche-specific associations likely shaped by cheese production practices since consistently abundant genera are most likely associated with the sheeps milk. 
+
+Interpretation 8: ASV-level analysis revealed that Streptococcus was a consistent dominant feature of Fresh and Pecorino-type cheeses, aligning with its known role in sheep milk fermentation. Other ASVs within Streptococcus and Lactobacillus showed cheese-type-specific patterns, suggesting functional strain-level diversity. The unexpected presence of Yersinia in several samples may indicate a less-studied raw milk or environmental signal. Together, these results highlight the importance of ASV-resolution for identifying both core fermenters and niche-specific microbial trends in artisanal sheep cheeses.
+
+# Session Information 
+
+For reproducibility 
+
+```{r session_info}
+devtools::session_info()
+```
