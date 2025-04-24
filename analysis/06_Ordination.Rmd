@@ -1,5 +1,5 @@
 ---
-title: "Untitled"
+title: "Between-Sample (Beta) Diversity of Microbes Across Cheese Type"
 author: "Chloe J McGovern"
 date: "`r Sys.Date()`"
 output: html_document
@@ -74,12 +74,6 @@ pacman::p_load(tidyverse, devtools, phyloseq, patchwork, vegan,
 
 # Load Colors 
 source("code/colors.R")
-
-cheese_colors <- c(
-  "Colonial" = "lightpink1",
-  "Feta-type" = "hotpink",
-  "Fresh" = "deeppink3",
-  "Pecorino-type" = "deeppink4")
 
 # Load functions 
 source("code/functions.R")
@@ -180,6 +174,8 @@ scaled_physeq <-
 
 # Look at it 
 scaled_physeq
+
+save(scaled_physeq, file = "data/06_Ordination/scaled_physeq.RData")
 
 # Look at it more!
 #View(data.frame(otu_table(midpoint_rooted_physeq)))
