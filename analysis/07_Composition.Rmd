@@ -294,7 +294,7 @@ genus_df <-
   # Melt to a long format 
   psmelt() 
 
-genus_df
+#genus_df #too big to print
 
 # add cheese_type
 Genus_DF <-
@@ -321,7 +321,7 @@ top_genus_names
 
 ### B1. Bacillota Genera
 
-```{r bacillota-genus, fig.width=6, fig.height=6}
+```{r bacillota-genus, fig.width=12, fig.height=6}
 # Bacillota
 # Plot genus 
 bacillota_genus_cheese <- 
@@ -348,7 +348,7 @@ bacillota_genus_cheese
 
 ### B2. Pseudomonadota Genera
 
-```{r pesudo-genus, fig.width=6, fig.height=6}
+```{r pesudo-genus, fig.width=12, fig.height=6}
 
 # Plot genus 
 pseudo_genus_cheese <- 
@@ -378,7 +378,7 @@ Interpretation 5: To explore mid-level taxonomic trends, I generated genus-level
 
 ## C. ASV level
 
-```{r ASV-plots, fig.width=12, fig.height=4}
+```{r ASV-plots, fig.width=6, fig.height=4}
 # Calculate the Family relative abundance 
 # Note: The read depth MUST be normalized in some way: scale_reads
 ASV_df <- 
@@ -436,7 +436,7 @@ bacillota_asv_cheese
 
 ### C2. Pseudomonadota ASVs
 
-```{r pseudo-asvs, fig.width=10, fig.height=8}
+```{r pseudo-asvs, fig.width=4, fig.height=4}
 # Calculate top couple of ASVs 
 # Make a list of phyla the top phyla 
 top_pseudo_ASVs <- 
