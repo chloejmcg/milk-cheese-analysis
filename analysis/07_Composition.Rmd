@@ -9,7 +9,7 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE,
-                      fig.path = "figures/07_Composition")
+                      fig.path = "../figures/07_Composition")
 ```
 
 # Setup 
@@ -282,7 +282,7 @@ Interpretation 4: Unfortunately, due to the lesser complexity of cheese microbia
 
 Let's first calculate the genus data frame. 
 
-```{r genus-actino-plots, fig.width=12, fig.height=4}
+```{r genus-plots, fig.width=12, fig.height=4}
 # Calculate the Family relative abundance 
 # Note: The read depth MUST be normalized in some way: scale_reads
 genus_df <- 
