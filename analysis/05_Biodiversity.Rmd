@@ -69,11 +69,6 @@ pacman::p_load(tidyverse, devtools, patchwork, iNEXT, phyloseq,
 # Load in colors for plotting 
 source("code/colors.R")
 
-cheese_colors <- c(
-  "Colonial" = "lightpink1",
-  "Feta-type" = "hotpink",
-  "Fresh" = "deeppink3",
-  "Pecorino-type" = "deeppink4")
 ```
 
 ## Load in Data 
