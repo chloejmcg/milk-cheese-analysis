@@ -372,6 +372,8 @@ pseudo_genus_cheese <-
 
 pseudo_genus_cheese
 
+bacillota_genus_cheese / pseudo_genus_cheese
+
 ```
 
 Interpretation 5: To explore mid-level taxonomic trends, I generated genus-level plots for dominant phyla identified in the initial analysis. This revealed meaningful differences masked at the phylum level. For example, while Bacillota appeared consistently dominant across cheese types, this pattern was largely driven by a single genus, Streptococcus, with other genera such as Lactobacillus and Lacticaseibacillus showing more variable, cheese-type-specific distributions. Similarly, while Pseudomonadota appeared low in overall abundance, genus-level plots revealed sporadic spikes in Yersinia, Klebsiella, and Pseudomonas in select samples. Given that a small number of dominant genera accounted for the majority of abundance, plotting intermediate ranks like family or order did not add interpretive value beyond the genus level.
