@@ -9,7 +9,7 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE,
-                      fig.path = "../figures/07_Composition")
+                      fig.path = "../figures/07_Composition/")
 ```
 
 # Setup 
@@ -191,12 +191,17 @@ phylum_df %>%
   geom_jitter() +
   geom_boxplot(outlier.shape = NA, alpha = 0.5) + 
   # change the colors to be our selected colors 
-  scale_fill_manual(values = phylum_colors) + 
-  scale_color_manual(values = phylum_colors) + 
+  scale_fill_manual(values = cheese_colors) + 
+  scale_color_manual(values = cheese_colors) + 
   theme_bw() + 
   theme(legend.position = "none",
         axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1))
 
+
+
+```
+
+```{r main-phyla, fig.width=5, fig.height=5}
 # just important two phyla
 
 phylum_df %>%
@@ -212,7 +217,6 @@ phylum_df %>%
     legend.position = "none",
     axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1)
   )
-
 ```
 
 Interpretation 3: Microbial composition across cheese types is consistently dominated by Bacillota, indicating its foundational role in cheese microbial communities. However, the increased relative abundance of Pseudomonadota in Feta-type cheeses suggests that cheese style may influence the presence or enrichment of certain microbial groups. This pattern supports the hypothesis that cheese processing conditions — such as moisture, salting, or aging — shape microbial community structure, even at the phylum level.
